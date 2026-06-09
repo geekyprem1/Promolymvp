@@ -285,6 +285,7 @@ async def run_pipeline(
         "resolution": "1920×1080",
         "fps":        FPS,
         "scenes":     n,
+        "ai_used":    storyboard.get("ai_used", False),
         "storyboard": storyboard,
     }
 

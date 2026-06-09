@@ -170,9 +170,34 @@ async def detect_sections(
         json.loads(patterns_json),
     )
 
-    # Ensure hero is always first if detected; sort by scroll position otherwise
+    # Ensure hero is always first; sort rest by scroll position
     raw.sort(key=lambda r: (0 if r["type"] == "hero" else 1, r["scrollY"]))
     raw = raw[:max_sections]
+
+    # ── Scroll-based fallback: fill up to max_sections if DOM detection found too few ──
+    if len(raw) < max_sections:
+        page_height, view_height = await page.evaluate(
+            "() => [document.documentElement.scrollHeight, window.innerHeight]"
+        )
+        used_y = {r["scrollY"] for r in raw}
+        extra_needed = max_sections - len(raw)
+        # Divide page into equal strips, skip positions already captured
+        SCROLL_TYPES = ["content", "benefits", "features", "demo",
+                        "testimonials", "integrations", "pricing", "cta"]
+        strip_count  = extra_needed + len(raw) + 2
+        step         = max(1, (page_height - view_height) // strip_count)
+        added        = 0
+        for k in range(1, strip_count + 1):
+            if added >= extra_needed:
+                break
+            y = min(k * step, page_height - view_height)
+            if any(abs(y - uy) < 300 for uy in used_y):
+                continue
+            used_y.add(y)
+            stype = SCROLL_TYPES[added % len(SCROLL_TYPES)]
+            raw.append({"type": stype, "scrollY": y,
+                        "heading": "", "subheading": "", "text": ""})
+            added += 1
 
     sections: list[SectionData] = []
 
@@ -180,7 +205,7 @@ async def detect_sections(
         await page.evaluate(
             "y => window.scrollTo({top: y, behavior: 'smooth'})", r["scrollY"]
         )
-        await page.wait_for_timeout(900)
+        await page.wait_for_timeout(800)
 
         path = session_dir / f"{r['type']}_{i:02d}.png"
         await page.screenshot(path=str(path), full_page=False)

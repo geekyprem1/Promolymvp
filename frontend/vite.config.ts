@@ -6,11 +6,11 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      "/generate": "http://localhost:8000",
-      "/progress": "http://localhost:8000",
-      "/output": "http://localhost:8000",
-      "/video": "http://localhost:8000",
-      "/health": "http://localhost:8000",
+      "/generate": "http://localhost:8001",
+      "/progress": "http://localhost:8001",
+      "/output": "http://localhost:8001",
+      "/video": "http://localhost:8001",
+      "/health": "http://localhost:8001",
     },
   },
 });

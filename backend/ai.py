@@ -26,10 +26,12 @@ TRANSITION_DUR  = 0.5
 def scenes_for_duration(target: int) -> int:
     """Return how many scenes fit within target seconds."""
     best = 2
-    for n in range(2, 10):
+    for n in range(2, 20):
         dur = n * SCENE_DURATION - (n - 1) * TRANSITION_DUR
         if dur <= target:
             best = n
+        else:
+            break  # increasing n only makes duration longer
     return best
 
 # ─── Layout + animation mappings ─────────────────────────────────────────────
@@ -69,74 +71,104 @@ def _build_prompt(meta: dict, sections: list["SectionData"], n_scenes: int) -> s
         for s in sections
     )
 
-    return f"""You are a professional marketing video director specializing in SaaS explainer videos.
-
-Analyze this website and generate a {n_scenes}-scene video storyboard.
-
-WEBSITE DATA:
-URL: {meta.get('url','')}
-Title: {meta.get('title','')}
-H1: {meta.get('h1','')}
-Description: {meta.get('description','')}
-
-DETECTED SECTIONS:
-{section_summary}
-
-RULES:
-1. Select exactly {n_scenes} scenes from the detected sections.
-2. First scene MUST use the "hero" section with "hero_layout".
-3. Last scene SHOULD be "cta_layout" (use "cta" section or repurpose hero).
-4. Headlines must be punchy marketing copy — MAX 5 WORDS.
-5. Subheadlines — MAX 10 WORDS.
-6. Vary layouts and animations. Do not repeat same layout twice in a row.
-7. Ignore: blog, careers, about, legal, footer (unless CTA).
-8. Prefer order: hero → features/demo → benefits/testimonials → pricing → cta.
-
-AVAILABLE LAYOUTS: hero_layout, split_layout, reverse_split_layout, feature_layout, cta_layout
-AVAILABLE ANIMATIONS: zoom_in, zoom_out, pan_left, pan_right, diagonal_motion, fade
-
-Return ONLY valid JSON — no markdown, no explanation:
-{{
-  "website_type": "saas|startup|ecommerce|agency|portfolio",
-  "video_style": "explainer|launch|showcase|presentation|promo",
+    json_example = '''
+{
+  "website_type": "saas",
+  "video_style": "explainer",
   "scenes": [
-    {{
-      "scene_type": "intro|feature|benefit|social_proof|pricing|cta",
-      "headline": "...",
-      "subheadline": "...",
-      "section": "<one of the detected section types>",
-      "layout": "<layout name>",
-      "animation": "<animation name>"
-    }}
+    {
+      "scene_type": "intro",
+      "headline": "Build Something Great",
+      "subheadline": "The platform teams love",
+      "section": "hero",
+      "layout": "hero_layout",
+      "animation": "zoom_in"
+    }
   ]
-}}"""
+}'''
+
+    return (
+        f"You are a professional marketing video director specializing in SaaS explainer videos.\n\n"
+        f"Analyze this website and generate a {n_scenes}-scene video storyboard.\n\n"
+        f"WEBSITE DATA:\n"
+        f"URL: {meta.get('url','')}\n"
+        f"Title: {meta.get('title','')}\n"
+        f"H1: {meta.get('h1','')}\n"
+        f"Description: {meta.get('description','')}\n\n"
+        f"DETECTED SECTIONS:\n{section_summary}\n\n"
+        f"RULES:\n"
+        f"1. Select exactly {n_scenes} scenes.\n"
+        f"2. First scene MUST be hero section with hero_layout.\n"
+        f"3. Last scene SHOULD be cta_layout.\n"
+        f"4. Headlines MAX 5 WORDS. Subheadlines MAX 10 WORDS.\n"
+        f"5. Vary layouts — no same layout twice in a row.\n"
+        f"6. Section value must be one of: {[s.section_type for s in sections]}\n\n"
+        f"AVAILABLE LAYOUTS: hero_layout, split_layout, reverse_split_layout, feature_layout, cta_layout\n"
+        f"AVAILABLE ANIMATIONS: zoom_in, zoom_out, pan_left, pan_right, diagonal_motion, fade\n\n"
+        f"Return ONLY valid JSON, no markdown, no explanation. Example format:{json_example}"
+    )
 
 
 # ─── Gemini call (async) ──────────────────────────────────────────────────────
 
 async def _call_gemini(prompt: str, api_key: str) -> str:
-    import google.generativeai as genai
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel("gemini-1.5-flash")
+    from google import genai
+    from google.genai import types
 
-    def _sync():
-        return model.generate_content(
-            prompt,
-            generation_config={"temperature": 0.4, "max_output_tokens": 2048},
-        ).text
+    client = genai.Client(api_key=api_key)
 
-    return await asyncio.to_thread(_sync)
+    MODELS = [
+        "gemini-2.5-flash",
+        "gemini-2.5-flash-lite",
+        "gemini-2.0-flash",
+        "gemini-2.0-flash-lite",
+        "gemini-flash-latest",
+        "gemini-pro-latest",
+    ]
+
+    last_err = None
+    for model_name in MODELS:
+        for attempt in range(3):  # retry 3x on 503
+            try:
+                def _sync(m=model_name):
+                    return client.models.generate_content(
+                        model=m,
+                        contents=prompt,
+                        config=types.GenerateContentConfig(
+                            temperature=0.4,
+                            max_output_tokens=2048,
+                        ),
+                    ).text
+                result = await asyncio.to_thread(_sync)
+                log.info("✅ Gemini model used: %s", model_name)
+                return result
+            except Exception as e:
+                err_str = str(e)
+                if "503" in err_str and attempt < 2:
+                    wait = (attempt + 1) * 5  # 5s, 10s
+                    log.warning("Model %s got 503, retry %d in %ds...", model_name, attempt+1, wait)
+                    await asyncio.sleep(wait)
+                    continue
+                log.warning("Model %s failed: %s", model_name, err_str[:120])
+                last_err = e
+                break
+
+    raise last_err
 
 
 def _parse_json(raw: str) -> dict:
     """Extract and parse JSON from Gemini response (handles markdown fences)."""
-    # Strip markdown code fences if present
     raw = re.sub(r"```(?:json)?", "", raw).strip()
+    raw = raw.replace("```", "").strip()
     # Find first { ... } block
-    match = re.search(r"\{.*\}", raw, re.DOTALL)
-    if not match:
+    start = raw.find("{")
+    end   = raw.rfind("}") + 1
+    if start == -1 or end == 0:
         raise ValueError("No JSON object found in Gemini response")
-    return json.loads(match.group())
+    json_str = raw[start:end]
+    # Fix common Gemini JSON issues: trailing commas
+    json_str = re.sub(r",\s*([}\]])", r"\1", json_str)
+    return json.loads(json_str)
 
 
 # ─── Rule-based fallback storyboard ──────────────────────────────────────────
@@ -213,7 +245,9 @@ async def generate_storyboard(
 
     if not api_key:
         log.info("No Gemini API key — using rule-based fallback storyboard.")
-        return _fallback_storyboard(sections, n_scenes)
+        board = _fallback_storyboard(sections, n_scenes)
+        board["ai_used"] = False
+        return board
 
     try:
         prompt = _build_prompt(meta, sections, n_scenes)
@@ -224,15 +258,17 @@ async def generate_storyboard(
         detected_types = {s.section_type for s in sections}
         valid_scenes = []
         for sc in board.get("scenes", []):
-            # If Gemini references a section we don't have, find nearest
             if sc.get("section") not in detected_types:
                 sc["section"] = sections[0].section_type if sections else "hero"
             valid_scenes.append(sc)
 
         board["scenes"] = valid_scenes[:n_scenes]
-        log.info("Gemini storyboard: %d scenes, style=%s", len(board["scenes"]), board.get("video_style"))
+        board["ai_used"] = True
+        log.info("✅ Gemini storyboard: %d scenes, style=%s", len(board["scenes"]), board.get("video_style"))
         return board
 
     except Exception as exc:
         log.warning("Gemini failed (%s) — falling back to rule-based storyboard.", exc)
-        return _fallback_storyboard(sections, n_scenes)
+        board = _fallback_storyboard(sections, n_scenes)
+        board["ai_used"] = False
+        return board

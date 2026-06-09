@@ -12,11 +12,13 @@ interface ProgressResponse {
 interface GenerateResult {
   status: string; video: string; session_id: string;
   duration: number; resolution: string; fps: number;
-  scenes: number; storyboard: { website_type: string; video_style: string };
+  scenes: number; ai_used: boolean;
+  storyboard: { website_type: string; video_style: string };
 }
 interface VideoMeta {
   duration: number; resolution: string; fps: number;
   scenes: number; website_type: string; video_style: string;
+  ai_used: boolean;
 }
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
@@ -136,7 +138,8 @@ function uuid() {
 
 export default function App() {
   const [url, setUrl]                     = useState("");
-  const [geminiKey, setGeminiKey]         = useState("");
+  const [geminiKey, setGeminiKey]         = useState(() => localStorage.getItem("gemini_key") || "");
+  const [keySaved, setKeySaved]           = useState(false);
   const [showAdvanced, setShowAdvanced]   = useState(false);
   const [targetDuration, setTargetDuration] = useState(20);
   const [stage, setStage]                 = useState<Stage>("idle");
@@ -214,6 +217,7 @@ export default function App() {
         scenes: data.scenes,
         website_type: data.storyboard?.website_type ?? "saas",
         video_style: data.storyboard?.video_style ?? "explainer",
+        ai_used: data.ai_used ?? false,
       });
       setProgress(100); setStage("done");
     } catch (err: unknown) {
@@ -320,24 +324,63 @@ export default function App() {
                 <ChevronDown/>
               </span>
               Advanced settings
+              {geminiKey && (
+                <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded-full
+                  bg-violet-500/20 text-violet-300 border border-violet-500/25">
+                  ✨ Gemini saved
+                </span>
+              )}
             </button>
             {showAdvanced && (
-              <div className="mt-3 space-y-1.5">
+              <div className="mt-3 space-y-2">
                 <label className="text-xs text-white/40">
                   Gemini API Key
                   <span className="ml-2 text-white/20">(optional — falls back to rule-based)</span>
                 </label>
-                <input type="password" value={geminiKey}
-                  onChange={e => setGeminiKey(e.target.value)}
-                  placeholder="AIza…"
-                  disabled={isLoading}
-                  className="w-full bg-white/[0.05] border border-white/[0.08] rounded-xl px-4 py-2.5
-                    text-sm text-white placeholder-white/15 focus:outline-none focus:ring-2
-                    focus:ring-indigo-500/50 transition disabled:opacity-40"
-                />
-                <p className="text-[10px] text-white/25">
-                  Get a free key at <span className="text-indigo-400/70">aistudio.google.com</span>
-                </p>
+                <div className="flex gap-2">
+                  <input type="password" value={geminiKey}
+                    onChange={e => { setGeminiKey(e.target.value); setKeySaved(false); }}
+                    placeholder="AIzaSy… ya AQ.Ab8…"
+                    disabled={isLoading}
+                    className="flex-1 bg-white/[0.05] border border-white/[0.08] rounded-xl px-4 py-2.5
+                      text-sm text-white placeholder-white/15 focus:outline-none focus:ring-2
+                      focus:ring-indigo-500/50 transition disabled:opacity-40"
+                  />
+                  <button
+                    onClick={() => {
+                      if (geminiKey.trim()) {
+                        localStorage.setItem("gemini_key", geminiKey.trim());
+                        setKeySaved(true);
+                      } else {
+                        localStorage.removeItem("gemini_key");
+                        setKeySaved(false);
+                      }
+                    }}
+                    disabled={isLoading}
+                    className="px-4 py-2.5 rounded-xl text-xs font-semibold transition-all
+                      bg-indigo-600/80 hover:bg-indigo-500 text-white border border-indigo-500/30
+                      disabled:opacity-40 whitespace-nowrap">
+                    {keySaved ? "✓ Saved!" : "Save"}
+                  </button>
+                </div>
+                {geminiKey && (
+                  <div className="flex items-center justify-between">
+                    <p className="text-[10px] text-emerald-400/70">
+                      ✓ Key saved in browser — auto-loaded on refresh
+                    </p>
+                    <button onClick={() => {
+                      localStorage.removeItem("gemini_key");
+                      setGeminiKey(""); setKeySaved(false);
+                    }} className="text-[10px] text-red-400/50 hover:text-red-400 transition-colors">
+                      Clear
+                    </button>
+                  </div>
+                )}
+                {!geminiKey && (
+                  <p className="text-[10px] text-white/25">
+                    Get a free key at <span className="text-indigo-400/70">aistudio.google.com</span>
+                  </p>
+                )}
               </div>
             )}
           </div>
@@ -384,6 +427,17 @@ export default function App() {
               <div className="flex items-center gap-2">
                 <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-500/15 text-indigo-300
                   border border-indigo-500/20 capitalize font-medium">{meta.video_style}</span>
+                {meta.ai_used ? (
+                  <span className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full
+                    bg-violet-500/15 text-violet-300 border border-violet-500/25 font-medium">
+                    ✨ Gemini AI
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full
+                    bg-white/5 text-white/35 border border-white/10 font-medium">
+                    Rule-based
+                  </span>
+                )}
                 <span className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full
                   bg-emerald-500/15 text-emerald-400 border border-emerald-500/20 font-medium">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"/>Ready
