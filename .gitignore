@@ -9,6 +9,8 @@ backend/assets/music.mp3
 # Node
 frontend/node_modules/
 frontend/dist/
+remotion/node_modules/
+remotion/out/
 
 # Secrets & logs
 backend/.env
