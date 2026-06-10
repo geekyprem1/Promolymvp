@@ -1,4 +1,65 @@
 export type TransitionType = "fade" | "slideLeft" | "slideRight" | "zoomIn" | "dissolve";
+export type MotionComponent = "textReveal" | "metricCounter" | "ctaAnimation" | "successPulse" | "zoomHighlight" | "cursorClick" | "none";
+
+// ── Motion Planner types ──────────────────────────────────────────────────────
+
+export interface CameraMotion {
+  zoomFrom: number;
+  zoomTo: number;
+  panX: number;
+  panY: number;
+  focusX: number; // transform-origin X 0-1
+  focusY: number; // transform-origin Y 0-1
+}
+
+export interface CursorWaypoint {
+  x: number;
+  y: number;
+  frame: number;
+}
+
+export interface CursorMotion {
+  enabled: boolean;
+  waypoints: CursorWaypoint[];
+  clickAtFrame: number | null;
+  showTrail: boolean;
+  color: string;
+}
+
+export interface HighlightTarget {
+  x: number;
+  y: number;
+  radius: number;
+  startFrame: number;
+  exitFrame: number;
+  color: string;
+}
+
+export interface BadgePlacement {
+  text: string;
+  icon: string | null;
+  x: number;
+  y: number;
+  startFrame: number;
+  exitFrame: number;
+  color: string;
+}
+
+export interface TransitionMotion {
+  in: TransitionType;
+  out: TransitionType;
+  easing: string;
+}
+
+export interface MotionPlan {
+  sceneId: string;
+  camera: CameraMotion;
+  cursor: CursorMotion;
+  highlights: HighlightTarget[];
+  badges: BadgePlacement[];
+  transitions: TransitionMotion;
+  motionComponent: MotionComponent;
+}
 
 export interface BaseSceneProps {
   from: number;
@@ -8,6 +69,8 @@ export interface BaseSceneProps {
   badge: string;
   screenshotUrl: string;
   transition: TransitionType;
+  narration?: string;
+  motionPlan?: MotionPlan;
 }
 
 export interface HeroSceneProps extends BaseSceneProps {
@@ -46,16 +109,39 @@ export interface ContentSceneProps extends BaseSceneProps {
   bodyText: string;
 }
 
+// ── Story-arc scene types ─────────────────────────────────────────────────────
+
+export interface HookSceneProps extends BaseSceneProps {
+  type: "hook";
+  stat?: string;
+  statLabel?: string;
+}
+
+export interface ProblemSceneProps extends BaseSceneProps {
+  type: "problem";
+  painPoints: string[];
+}
+
+export interface SolutionSceneProps extends BaseSceneProps {
+  type: "solution";
+  checkpoints: string[];
+}
+
 export type AnySceneProps =
   | HeroSceneProps
   | FeaturesSceneProps
   | BenefitsSceneProps
   | TestimonialsSceneProps
   | CTASceneProps
-  | ContentSceneProps;
+  | ContentSceneProps
+  | HookSceneProps
+  | ProblemSceneProps
+  | SolutionSceneProps;
 
 export interface PromoVideoProps {
   scenes: AnySceneProps[];
   websiteType: string;
   videoStyle: string;
+  templateId?: string;
+  templateSpring?: { stiffness: number; damping: number; mass: number };
 }

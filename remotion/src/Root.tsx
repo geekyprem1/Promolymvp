@@ -1,6 +1,7 @@
 import React from "react";
 import { Composition } from "remotion";
 import { PromoVideo } from "./compositions/PromoVideo";
+import { ComponentDemo } from "./compositions/ComponentDemo";
 import { PromoVideoProps } from "./lib/types";
 
 const defaultProps: PromoVideoProps = {
@@ -52,6 +53,7 @@ export const RemotionRoot: React.FC = () => {
   );
 
   return (
+    <>
     <Composition
       id="PromoVideo"
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -71,5 +73,15 @@ export const RemotionRoot: React.FC = () => {
         return { durationInFrames: Math.max(total, 1) };
       }}
     />
+    <Composition
+      id="ComponentDemo"
+      component={ComponentDemo}
+      durationInFrames={900}
+      fps={30}
+      width={1920}
+      height={1080}
+      defaultProps={{}}
+    />
+    </>
   );
 };

@@ -11,8 +11,13 @@ import asyncio
 import os
 import re
 import shutil
+import sys
 import uuid
 from pathlib import Path
+
+# Windows: Playwright needs ProactorEventLoop for subprocess support
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
@@ -24,7 +29,10 @@ from pydantic import BaseModel
 load_dotenv()
 
 from detector import detect_sections, extract_page_meta
+from story_extractor import extract_story
 from ai import generate_storyboard, build_remotion_props, scenes_for_duration
+from motion_planner import plan_motion
+from templates import get_template, TEMPLATE_LIST
 from remotion_bridge import render_remotion_video
 
 BASE_DIR        = Path(__file__).parent
@@ -51,6 +59,7 @@ class GenerateRequest(BaseModel):
     session_id: str | None  = None
     target_duration: int    = 20
     gemini_api_key: str | None = None
+    template_id: str | None = None
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -82,6 +91,7 @@ async def run_pipeline(
     session_id: str,
     target_duration: int,
     api_key: str | None,
+    template_id: str | None = None,
 ) -> dict:
     session_dir = SCREENSHOTS_DIR / session_id
     session_dir.mkdir(parents=True, exist_ok=True)
@@ -121,9 +131,27 @@ async def run_pipeline(
     if not sections:
         raise HTTPException(status_code=500, detail="No sections detected on page.")
 
-    # ── STEP 2: AI storyboard ─────────────────────────────────────────────────
-    _set(session_id, "analyzing", 42, "Gemini AI analysing website…")
-    raw_board = await generate_storyboard(meta, sections, target_duration, api_key)
+    # ── STEP 2: Story extraction ──────────────────────────────────────────────
+    _set(session_id, "analyzing", 38, "Extracting product story…")
+    story = extract_story(meta, sections)
+    print(
+        f"[Story] problem={bool(story.problem)} solution={bool(story.solution)} "
+        f"benefits={len(story.benefits)} proof={len(story.social_proof)} "
+        f"rich={story.is_rich()}",
+        flush=True,
+    )
+
+    # ── STEP 3: AI storyboard ─────────────────────────────────────────────────
+    _set(session_id, "analyzing", 42, "Gemini AI writing video script…")
+    raw_board = await generate_storyboard(meta, sections, target_duration, api_key, story=story)
+
+    # If AI was requested but fallback happened — tell frontend
+    if api_key and not raw_board.get("ai_used", False):
+        gemini_error = raw_board.get("gemini_error", "Gemini API failed")
+        raise HTTPException(
+            status_code=402,
+            detail={"type": "ai_fallback", "reason": gemini_error}
+        )
 
     # ── STEP 3: Build Remotion props (inject screenshot URLs + frame offsets) ──
     _set(session_id, "rendering", 50, "Building Remotion storyboard…")
@@ -135,6 +163,12 @@ async def run_pipeline(
         website_type = raw_board.get("website_type", "saas"),
         video_style  = raw_board.get("video_style",  "explainer"),
     )
+
+    # ── STEP 3b: Motion Planner ───────────────────────────────────────────────
+    _set(session_id, "rendering", 52, "Planning motion…")
+    template = get_template(template_id)
+    print(f"[Template] Using template: {template.name} ({template.id})", flush=True)
+    remotion_props = plan_motion(remotion_props, sections=sections, meta=meta, template=template)
 
     # ── STEP 4: Remotion render ───────────────────────────────────────────────
     async def _rend_cb(pct: int, msg: str):
@@ -157,6 +191,17 @@ async def run_pipeline(
 
     _set(session_id, "done", 100, "Video ready!")
 
+    # Build lightweight scene list for frontend storyboard display
+    scene_list = [
+        {
+            "type":             s.get("type", ""),
+            "headline":         s.get("headline", ""),
+            "narration":        s.get("narration", ""),
+            "durationInFrames": s.get("durationInFrames", 150),
+        }
+        for s in remotion_props.get("scenes", [])
+    ]
+
     return {
         "status":     "success",
         "video":      f"output/{session_id}.mp4",
@@ -169,6 +214,7 @@ async def run_pipeline(
         "storyboard": {
             "website_type": remotion_props.get("websiteType", "saas"),
             "video_style":  remotion_props.get("videoStyle",  "explainer"),
+            "scenes":       scene_list,
         },
     }
 
@@ -189,7 +235,7 @@ async def generate_video(req: GenerateRequest):
     _set(sid, "validating", 5, "Validating URL…")
 
     try:
-        return await run_pipeline(url, sid, req.target_duration, api_key)
+        return await run_pipeline(url, sid, req.target_duration, api_key, req.template_id)
     except HTTPException:
         raise
     except Exception as exc:
@@ -200,6 +246,11 @@ async def generate_video(req: GenerateRequest):
 @app.get("/progress/{session_id}")
 async def get_progress(session_id: str):
     return progress_store.get(session_id, {"stage": "pending", "pct": 0, "message": ""})
+
+
+@app.get("/templates")
+async def list_templates():
+    return {"templates": TEMPLATE_LIST}
 
 
 @app.get("/health")
