@@ -61,6 +61,18 @@ export interface MotionPlan {
   motionComponent: MotionComponent;
 }
 
+// ── Video Style System ──────────────────────────────────────────────────────
+export type VideoStyle = "hybrid" | "website-showcase" | "motion-graphics";
+export type ComponentRole = "screenshot" | "motion";
+export type MotionIntent = "zoom" | "highlight" | "cursor" | "animate";
+
+export interface HighlightBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 export interface BaseSceneProps {
   from: number;
   durationInFrames: number;
@@ -71,6 +83,18 @@ export interface BaseSceneProps {
   transition: TransitionType;
   narration?: string;
   motionPlan?: MotionPlan;
+
+  // ── Video Style System (set by style_engine.py) ──
+  videoStyle?: VideoStyle;
+  componentType?: string;       // Remotion renderer key ("ScreenshotScene" / motion name)
+  componentRole?: ComponentRole;
+  motionIntent?: MotionIntent;
+
+  // ── Visual Mapper (set by visual_mapper.py) ──
+  visualTargetId?: string | null;
+  focusX?: number;
+  focusY?: number;
+  highlightBox?: HighlightBox | null;
 }
 
 export interface HeroSceneProps extends BaseSceneProps {

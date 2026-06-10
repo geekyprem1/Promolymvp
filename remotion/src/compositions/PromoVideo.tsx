@@ -9,6 +9,8 @@ import { FeaturesScene } from "../scenes/FeaturesScene";
 import { BenefitsScene } from "../scenes/BenefitsScene";
 import { TestimonialsScene } from "../scenes/TestimonialsScene";
 import { CTAScene } from "../scenes/CTAScene";
+import { ScreenshotScene } from "../scenes/ScreenshotScene";
+import { MotionGraphicsScene } from "../scenes/MotionGraphicsScene";
 import { SceneMotionLayer } from "../components/SceneMotionLayer";
 import { TemplateContext, getTemplate } from "../lib/templates";
 
@@ -24,6 +26,18 @@ const DEFAULT_MOTION_PLAN: MotionPlan = {
 };
 
 function renderSceneContent(scene: AnySceneProps): React.ReactNode {
+  // ── Video Style System dispatch ──
+  // The style engine sets componentType per scene:
+  //   "ScreenshotScene"  → website showcase renderer
+  //   anything else (motion component name / "MotionGraphicsScene") → motion graphics
+  // When componentType is absent (legacy props), fall back to type-based dispatch.
+  if (scene.componentType) {
+    if (scene.componentType === "ScreenshotScene") {
+      return <ScreenshotScene {...scene} />;
+    }
+    return <MotionGraphicsScene {...scene} />;
+  }
+
   switch (scene.type) {
     // Story-arc scenes
     case "hook":

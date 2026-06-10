@@ -33,6 +33,7 @@ from story_extractor import extract_story
 from ai import generate_storyboard, build_remotion_props, scenes_for_duration
 from motion_planner import plan_motion
 from templates import get_template, TEMPLATE_LIST
+from style_engine import apply_style, STYLE_LIST, DEFAULT_STYLE_ID
 from remotion_bridge import render_remotion_video
 from music_selector import select_music
 from audio_mixer import mix_audio
@@ -67,6 +68,7 @@ class GenerateRequest(BaseModel):
     target_duration: int    = 20
     gemini_api_key: str | None = None
     template_id: str | None = None
+    video_style: str | None = None   # "hybrid" (default) | "website-showcase" | "motion-graphics"
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -99,6 +101,7 @@ async def run_pipeline(
     target_duration: int,
     api_key: str | None,
     template_id: str | None = None,
+    video_style: str | None = None,
 ) -> dict:
     session_dir    = SCREENSHOTS_DIR / session_id
     session_dir.mkdir(parents=True, exist_ok=True)
@@ -182,7 +185,12 @@ async def run_pipeline(
     mapped_scenes = map_visuals(remotion_props.get("scenes", []), visual_elements)
     remotion_props = {**remotion_props, "scenes": mapped_scenes}
 
-    # ── STEP 3c: Motion Planner ───────────────────────────────────────────────
+    # ── STEP 3c: Video Style ──────────────────────────────────────────────────
+    _set(session_id, "rendering", 52, "Applying video style…")
+    print(f"[Style] Requested video_style: {video_style or DEFAULT_STYLE_ID}", flush=True)
+    remotion_props = apply_style(remotion_props, video_style)
+
+    # ── STEP 3d: Motion Planner ───────────────────────────────────────────────
     _set(session_id, "rendering", 53, "Planning motion…")
     template = get_template(template_id)
     print(f"[Template] Using template: {template.name} ({template.id})", flush=True)
@@ -240,6 +248,9 @@ async def run_pipeline(
             "headline":         s.get("headline", ""),
             "narration":        s.get("narration", ""),
             "durationInFrames": s.get("durationInFrames", 150),
+            "componentType":    s.get("componentType", ""),
+            "componentRole":    s.get("componentRole", ""),
+            "motionIntent":     s.get("motionIntent", ""),
         }
         for s in remotion_props.get("scenes", [])
     ]
@@ -281,7 +292,10 @@ async def generate_video(req: GenerateRequest):
     _set(sid, "validating", 5, "Validating URL…")
 
     try:
-        return await run_pipeline(url, sid, req.target_duration, api_key, req.template_id)
+        return await run_pipeline(
+            url, sid, req.target_duration, api_key,
+            req.template_id, req.video_style,
+        )
     except HTTPException:
         raise
     except Exception as exc:
@@ -297,6 +311,11 @@ async def get_progress(session_id: str):
 @app.get("/templates")
 async def list_templates():
     return {"templates": TEMPLATE_LIST}
+
+
+@app.get("/styles")
+async def list_styles():
+    return {"styles": STYLE_LIST, "default": DEFAULT_STYLE_ID}
 
 
 @app.get("/health")

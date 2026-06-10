@@ -171,6 +171,14 @@ export default function App() {
     { id: "startup",     name: "Startup Pitch", description: "High energy, bouncy, stats-forward" },
     { id: "minimal",     name: "Minimal",       description: "Light background, static camera" },
   ]);
+  const [videoStyle, setVideoStyle]       = useState<string>(() =>
+    localStorage.getItem("promoly_style") || "hybrid"
+  );
+  const [styleList, setStyleList]         = useState<TemplateInfo[]>([
+    { id: "hybrid",           name: "Hybrid",           description: "Motion-graphics story + real screenshots. Premium." },
+    { id: "website-showcase", name: "Website Showcase", description: "Real screenshots, cursor & zoom — a live demo." },
+    { id: "motion-graphics",  name: "Motion Graphics",  description: "Animated cards & kinetic type — a SaaS ad." },
+  ]);
   const t: ThemeTokens = useMemo(() => THEMES[themeKey], [themeKey]);
 
   const toggleTheme = () => {
@@ -184,11 +192,20 @@ export default function App() {
     localStorage.setItem("promoly_template", id);
   };
 
-  // Fetch template list from backend (non-blocking, updates if different from defaults)
+  const selectStyle = (id: string) => {
+    setVideoStyle(id);
+    localStorage.setItem("promoly_style", id);
+  };
+
+  // Fetch template + style lists from backend (non-blocking, updates if different)
   useEffect(() => {
     fetch("/templates")
       .then(r => r.json())
       .then(d => { if (d.templates?.length) setTemplateList(d.templates); })
+      .catch(() => { /* keep defaults */ });
+    fetch("/styles")
+      .then(r => r.json())
+      .then(d => { if (d.styles?.length) setStyleList(d.styles); })
       .catch(() => { /* keep defaults */ });
   }, []);
 
@@ -242,6 +259,7 @@ export default function App() {
           target_duration: targetDuration,
           gemini_api_key: withKey ? (geminiKey.trim() || undefined) : undefined,
           template_id: templateId,
+          video_style: videoStyle,
         }),
       });
       stopPolling();
@@ -483,6 +501,52 @@ export default function App() {
             />
             <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, color: t.textDim, marginTop: 6 }}>
               <span>8S</span><span>15S</span><span>22S</span><span>30S</span>
+            </div>
+          </div>
+
+          {/* Video Style Selector */}
+          <div style={{ marginBottom: 20 }}>
+            <label style={{ fontSize: 9, color: t.textDim, letterSpacing: "0.2em", display: "block", marginBottom: 10 }}>
+              VIDEO STYLE
+            </label>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6 }}>
+              {styleList.map(st => {
+                const isSelected = videoStyle === st.id;
+                const accent = t.accent;
+                return (
+                  <button
+                    key={st.id}
+                    onClick={() => selectStyle(st.id)}
+                    disabled={isLoading}
+                    title={st.description}
+                    style={{
+                      position: "relative",
+                      background: isSelected ? (themeKey === "dark" ? "#111" : "#fff") : "transparent",
+                      border: isSelected ? `1px solid ${accent}` : `1px solid ${t.border}`,
+                      cursor: isLoading ? "not-allowed" : "pointer",
+                      padding: "11px 8px 10px",
+                      textAlign: "center",
+                      transition: "all 0.15s",
+                      opacity: isLoading ? 0.5 : 1,
+                    }}
+                    onMouseEnter={e => { if (!isLoading) e.currentTarget.style.borderColor = accent; }}
+                    onMouseLeave={e => { if (!isLoading) e.currentTarget.style.borderColor = isSelected ? accent : t.border; }}
+                  >
+                    <div style={{
+                      fontSize: 8, fontWeight: 700, letterSpacing: "0.08em",
+                      color: isSelected ? accent : t.textMuted,
+                      fontFamily: "'Space Mono', monospace", lineHeight: 1.35,
+                    }}>
+                      {st.name.toUpperCase()}
+                      {st.id === "hybrid" && <span style={{ color: t.textDim, fontSize: 7 }}> ★</span>}
+                    </div>
+                    {isSelected && (
+                      <div style={{ position: "absolute", top: 4, right: 5, fontSize: 7, color: accent,
+                        fontFamily: "'Space Mono', monospace" }}>✓</div>
+                    )}
+                  </button>
+                );
+              })}
             </div>
           </div>
 

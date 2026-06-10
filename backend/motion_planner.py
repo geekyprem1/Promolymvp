@@ -27,6 +27,12 @@ if TYPE_CHECKING:
 W, H = 1920, 1080
 CX, CY = W // 2, H // 2   # canvas centre
 
+# Reusable disabled-cursor object (motion-graphics scenes have no cursor)
+_DISABLED_CURSOR = {
+    "enabled": False, "waypoints": [], "clickAtFrame": None,
+    "showTrail": False, "color": "#ffffff",
+}
+
 # Accent colour palette (matches Remotion theme)
 ACCENT   = "#6366f1"
 VIOLET   = "#8b5cf6"
@@ -438,11 +444,18 @@ def plan_motion(
         scene_type = scene.get("type", "hero")
         duration   = scene.get("durationInFrames", 150)
 
+        # Video-style role: cursor + highlight rings only make sense over a real
+        # screenshot. Motion-graphics scenes keep camera + motionComponent but
+        # drop the website-overlay elements. Default to "screenshot" when the
+        # style engine hasn't run (backward compatibility).
+        role = scene.get("componentRole", "screenshot")
+        is_screenshot = role == "screenshot"
+
         motion_plan = {
             "sceneId":         f"scene_{i}",
             "camera":          _plan_camera(scene_type, duration, i, total, template, scene),
-            "cursor":          _plan_cursor(scene_type, duration, scene, i, template),
-            "highlights":      _plan_highlights(scene_type, duration, scene, template),
+            "cursor":          _plan_cursor(scene_type, duration, scene, i, template) if is_screenshot else _DISABLED_CURSOR.copy(),
+            "highlights":      _plan_highlights(scene_type, duration, scene, template) if is_screenshot else [],
             "badges":          _plan_badges(scene_type, duration, scene, template),
             "transitions":     _plan_transitions(scene_type, i, total, scene, template),
             "motionComponent": _assign_motion_component(scene_type, scene, template),
