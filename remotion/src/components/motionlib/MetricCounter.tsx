@@ -1,7 +1,7 @@
 import React from "react";
 import { useCurrentFrame, interpolate, spring, useVideoConfig } from "remotion";
-import { theme, fonts } from "../../lib/theme";
 import { easeOutCubic } from "../../lib/easing";
+import { useTemplate } from "../../lib/templates";
 
 export interface MetricCounterProps {
   from?: number;
@@ -23,13 +23,15 @@ export const MetricCounter: React.FC<MetricCounterProps> = ({
   suffix = "",
   label = "",
   decimals = 0,
-  accentColor = theme.accent,
+  accentColor,
   startFrame = 0,
   exitStartFrame = 999,
   style = {},
 }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
+  const tpl = useTemplate();
+  const accent = accentColor ?? tpl.colors.accent;
   const f = frame - startFrame;
 
   // Enter
@@ -60,7 +62,7 @@ export const MetricCounter: React.FC<MetricCounterProps> = ({
         gap: 14,
         opacity: finalOpacity,
         transform: `scale(${scale})`,
-        fontFamily: fonts.heading,
+        fontFamily: tpl.typography.headingFont,
         ...style,
       }}
     >
@@ -68,10 +70,10 @@ export const MetricCounter: React.FC<MetricCounterProps> = ({
         style={{
           fontSize: 96,
           fontWeight: 800,
-          color: accentColor,
+          color: accent,
           lineHeight: 1,
           letterSpacing: "-2px",
-          textShadow: `0 0 ${40 * glowPulse}px ${accentColor}88`,
+          textShadow: `0 0 ${40 * glowPulse}px ${accent}88`,
         }}
       >
         {prefix}{displayValue}{suffix}
@@ -81,7 +83,7 @@ export const MetricCounter: React.FC<MetricCounterProps> = ({
           style={{
             fontSize: 20,
             fontWeight: 500,
-            color: theme.textMuted,
+            color: tpl.colors.textMuted,
             textTransform: "uppercase",
             letterSpacing: "3px",
           }}
@@ -89,7 +91,7 @@ export const MetricCounter: React.FC<MetricCounterProps> = ({
           {label}
         </div>
       )}
-      <div style={{ width: 60, height: 2, background: accentColor, borderRadius: 1, opacity: 0.5 }} />
+      <div style={{ width: 60, height: 2, background: accent, borderRadius: 1, opacity: 0.5 }} />
     </div>
   );
 };

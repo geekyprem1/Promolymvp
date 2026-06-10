@@ -1,7 +1,7 @@
 import React from "react";
 import { useCurrentFrame, interpolate, spring, useVideoConfig } from "remotion";
-import { theme, fonts } from "../../lib/theme";
 import { easeOutBack, easeOutCubic } from "../../lib/easing";
+import { useTemplate } from "../../lib/templates";
 
 export interface FeatureCardProps {
   icon: string;
@@ -17,13 +17,15 @@ export const FeatureCard: React.FC<FeatureCardProps> = ({
   icon,
   title,
   description,
-  accentColor = theme.accent,
+  accentColor,
   startFrame = 0,
   exitStartFrame = 999,
   style = {},
 }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
+  const tpl = useTemplate();
+  const accent = accentColor ?? tpl.colors.accent;
   const f = frame - startFrame;
 
   // Enter
@@ -51,14 +53,14 @@ export const FeatureCard: React.FC<FeatureCardProps> = ({
         flexDirection: "column",
         gap: 20,
         padding: "44px 40px",
-        background: theme.surface,
-        border: `1.5px solid ${accentColor}33`,
+        background: tpl.colors.surface,
+        border: `1.5px solid ${accent}33`,
         borderRadius: 20,
         width: 380,
         opacity: finalOpacity,
         transform: `scale(${finalScale}) translateY(${finalY}px)`,
-        boxShadow: `0 0 40px ${accentColor}18`,
-        fontFamily: fonts.body,
+        boxShadow: `0 0 40px ${accent}18`,
+        fontFamily: tpl.typography.bodyFont,
         ...style,
       }}
     >
@@ -67,8 +69,8 @@ export const FeatureCard: React.FC<FeatureCardProps> = ({
           width: 64,
           height: 64,
           borderRadius: 16,
-          background: `${accentColor}22`,
-          border: `1.5px solid ${accentColor}44`,
+          background: `${accent}22`,
+          border: `1.5px solid ${accent}44`,
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
@@ -77,13 +79,13 @@ export const FeatureCard: React.FC<FeatureCardProps> = ({
       >
         {icon}
       </div>
-      <div style={{ fontSize: 26, fontWeight: 700, color: theme.text, lineHeight: 1.2 }}>
+      <div style={{ fontSize: 26, fontWeight: 700, color: tpl.colors.text, lineHeight: 1.2 }}>
         {title}
       </div>
-      <div style={{ fontSize: 18, color: theme.textMuted, lineHeight: 1.6 }}>
+      <div style={{ fontSize: 18, color: tpl.colors.textMuted, lineHeight: 1.6 }}>
         {description}
       </div>
-      <div style={{ width: 48, height: 3, borderRadius: 2, background: accentColor, marginTop: 4 }} />
+      <div style={{ width: 48, height: 3, borderRadius: 2, background: accent, marginTop: 4 }} />
     </div>
   );
 };

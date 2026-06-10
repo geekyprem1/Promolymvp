@@ -27,3 +27,9 @@ export type { SuccessAnimationProps } from "./SuccessAnimation";
 
 export { TextReveal } from "./TextReveal";
 export type { TextRevealProps, RevealMode } from "./TextReveal";
+
+export { ParticleField } from "./ParticleField";
+export type { ParticleFieldProps } from "./ParticleField";
+
+export { AnimatedGrid } from "./AnimatedGrid";
+export type { AnimatedGridProps } from "./AnimatedGrid";

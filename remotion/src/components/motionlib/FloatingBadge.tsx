@@ -1,7 +1,7 @@
 import React from "react";
 import { useCurrentFrame, interpolate, spring, useVideoConfig } from "remotion";
-import { theme, fonts } from "../../lib/theme";
 import { easeOutBack, easeOutCubic } from "../../lib/easing";
+import { useTemplate } from "../../lib/templates";
 
 export interface FloatingBadgeProps {
   text: string;
@@ -16,7 +16,7 @@ export interface FloatingBadgeProps {
 export const FloatingBadge: React.FC<FloatingBadgeProps> = ({
   text,
   icon,
-  accentColor = theme.accent,
+  accentColor,
   variant = "pill",
   startFrame = 0,
   exitStartFrame = 999,
@@ -24,6 +24,8 @@ export const FloatingBadge: React.FC<FloatingBadgeProps> = ({
 }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
+  const tpl = useTemplate();
+  const accent = accentColor ?? tpl.colors.accent;
   const f = frame - startFrame;
 
   // Enter: pop + fade
@@ -54,13 +56,13 @@ export const FloatingBadge: React.FC<FloatingBadgeProps> = ({
         alignItems: "center",
         gap: 8,
         padding: variant === "chip" ? "8px 18px" : "10px 22px",
-        background: `${accentColor}22`,
-        border: `1.5px solid ${accentColor}66`,
+        background: `${accent}22`,
+        border: `1.5px solid ${accent}66`,
         borderRadius,
         opacity: finalOpacity,
         transform: `scale(${finalScale}) translateY(${finalY}px) rotate(${finalRot}deg)`,
-        boxShadow: `0 4px 24px ${accentColor}30`,
-        fontFamily: fonts.body,
+        boxShadow: `0 4px 24px ${accent}30`,
+        fontFamily: tpl.typography.bodyFont,
         ...style,
       }}
     >
@@ -69,7 +71,7 @@ export const FloatingBadge: React.FC<FloatingBadgeProps> = ({
         style={{
           fontSize: 16,
           fontWeight: 700,
-          color: accentColor,
+          color: accent,
           letterSpacing: "1.5px",
           textTransform: "uppercase",
         }}

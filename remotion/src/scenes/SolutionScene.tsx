@@ -4,6 +4,8 @@ import { SolutionSceneProps } from "../lib/types";
 import { easeOutBack, easeOutCubic } from "../lib/easing";
 import { TextReveal } from "../components/TextReveal";
 import { SuccessAnimation } from "../components/motionlib/SuccessAnimation";
+import { FloatingBadge } from "../components/motionlib/FloatingBadge";
+import { ParticleField } from "../components/motionlib/ParticleField";
 import { useTemplate } from "../lib/templates";
 
 // Green is semantic for "solution" — intentional regardless of template
@@ -66,6 +68,12 @@ export const SolutionScene: React.FC<SolutionSceneProps> = ({
         opacity: revealGlow,
         pointerEvents: "none",
       }} />
+
+      {/* Secondary — particles + "The Fix" badge */}
+      <ParticleField color={SOLUTION_COLOR} count={12} startFrame={8} intensity={0.45} />
+      <div style={{ position: "absolute", top: 52, right: 60, zIndex: 4 }}>
+        <FloatingBadge text="The Fix" icon="✓" variant="chip" startFrame={12} accentColor={SOLUTION_COLOR} />
+      </div>
 
       {/* Content */}
       <div style={{

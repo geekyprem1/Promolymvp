@@ -3,6 +3,8 @@ import { useCurrentFrame, interpolate, spring, useVideoConfig } from "remotion";
 import { HookSceneProps } from "../lib/types";
 import { easeOutCubic } from "../lib/easing";
 import { TextReveal } from "../components/TextReveal";
+import { FloatingBadge } from "../components/motionlib/FloatingBadge";
+import { ParticleField } from "../components/motionlib/ParticleField";
 import { useTemplate } from "../lib/templates";
 
 export const HookScene: React.FC<HookSceneProps> = ({
@@ -56,6 +58,15 @@ export const HookScene: React.FC<HookSceneProps> = ({
         position: "absolute", inset: 0,
         background: tpl.colors.heroOverlay,
       }} />
+
+      {/* Secondary — particle energy + badge chips */}
+      <ParticleField color={c.accent} count={12} startFrame={10} intensity={0.5} />
+      {hasStat && (
+        <div style={{ position: "absolute", top: 52, left: 60, zIndex: 4, display: "flex", gap: 12 }}>
+          <FloatingBadge text="Hook" icon="⚡" variant="chip" startFrame={8} />
+          <FloatingBadge text={statLabel || "Key Stat"} variant="chip" startFrame={20} />
+        </div>
+      )}
 
       {/* Central layout */}
       <div style={{

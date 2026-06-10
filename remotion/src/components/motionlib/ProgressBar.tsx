@@ -1,7 +1,7 @@
 import React from "react";
 import { useCurrentFrame, interpolate, spring, useVideoConfig } from "remotion";
-import { theme, fonts } from "../../lib/theme";
 import { easeOutCubic } from "../../lib/easing";
+import { useTemplate } from "../../lib/templates";
 
 export interface ProgressBarProps {
   fromPercent?: number;
@@ -20,7 +20,7 @@ export const ProgressBar: React.FC<ProgressBarProps> = ({
   toPercent,
   label,
   showValue = true,
-  accentColor = theme.accent,
+  accentColor,
   height = 16,
   startFrame = 0,
   exitStartFrame = 999,
@@ -28,6 +28,8 @@ export const ProgressBar: React.FC<ProgressBarProps> = ({
 }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
+  const tpl = useTemplate();
+  const accent = accentColor ?? tpl.colors.accent;
   const f = frame - startFrame;
 
   // Enter: bar fills from left via spring
@@ -57,19 +59,19 @@ export const ProgressBar: React.FC<ProgressBarProps> = ({
         width: "100%",
         opacity: finalOpacity,
         transform: `translateY(${slideY}px)`,
-        fontFamily: fonts.body,
+        fontFamily: tpl.typography.bodyFont,
         ...style,
       }}
     >
       {(label || showValue) && (
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           {label && (
-            <span style={{ fontSize: 18, fontWeight: 600, color: theme.textMuted, letterSpacing: "1px" }}>
+            <span style={{ fontSize: 18, fontWeight: 600, color: tpl.colors.textMuted, letterSpacing: "1px" }}>
               {label}
             </span>
           )}
           {showValue && (
-            <span style={{ fontSize: 20, fontWeight: 700, color: accentColor }}>
+            <span style={{ fontSize: 20, fontWeight: 700, color: accent }}>
               {Math.round(currentPct)}%
             </span>
           )}
@@ -80,8 +82,8 @@ export const ProgressBar: React.FC<ProgressBarProps> = ({
         style={{
           width: "100%",
           height,
-          background: theme.surface,
-          border: `1px solid ${theme.border}`,
+          background: tpl.colors.surface,
+          border: `1px solid ${tpl.colors.border}`,
           borderRadius: height,
           overflow: "hidden",
           position: "relative",
@@ -92,11 +94,11 @@ export const ProgressBar: React.FC<ProgressBarProps> = ({
           style={{
             width: `${currentPct}%`,
             height: "100%",
-            background: `linear-gradient(90deg, ${accentColor}cc, ${accentColor})`,
+            background: `linear-gradient(90deg, ${accent}cc, ${accent})`,
             borderRadius: height,
             position: "relative",
             overflow: "hidden",
-            boxShadow: `0 0 16px ${accentColor}88`,
+            boxShadow: `0 0 16px ${accent}88`,
             transition: "width 0.1s",
           }}
         >
@@ -124,8 +126,8 @@ export const ProgressBar: React.FC<ProgressBarProps> = ({
               width: height + 4,
               height: height + 4,
               borderRadius: "50%",
-              background: accentColor,
-              boxShadow: `0 0 12px ${accentColor}`,
+              background: accent,
+              boxShadow: `0 0 12px ${accent}`,
               opacity: glowOpacity,
             }}
           />

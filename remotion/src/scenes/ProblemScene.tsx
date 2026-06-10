@@ -3,6 +3,8 @@ import { useCurrentFrame, interpolate, spring, useVideoConfig } from "remotion";
 import { ProblemSceneProps } from "../lib/types";
 import { easeOutCubic, easeOutBack } from "../lib/easing";
 import { TextReveal } from "../components/TextReveal";
+import { FloatingBadge } from "../components/motionlib/FloatingBadge";
+import { ParticleField } from "../components/motionlib/ParticleField";
 import { useTemplate } from "../lib/templates";
 
 // Pain red is semantic — intentional regardless of template
@@ -55,6 +57,12 @@ export const ProblemScene: React.FC<ProblemSceneProps> = ({
         `,
         pointerEvents: "none",
       }} />
+
+      {/* Secondary — particles + "Sound familiar?" badge */}
+      <ParticleField color="#ef4444" count={10} startFrame={6} intensity={0.4} />
+      <div style={{ position: "absolute", top: 52, right: 60, zIndex: 4 }}>
+        <FloatingBadge text="Sound familiar?" icon="⚠" variant="chip" startFrame={10} accentColor={PAIN_COLOR} />
+      </div>
 
       {/* Content */}
       <div style={{
