@@ -28,19 +28,25 @@ from pydantic import BaseModel
 
 load_dotenv()
 
-from detector import detect_sections, extract_page_meta
+from detector import detect_sections, extract_page_meta, extract_visual_elements
 from story_extractor import extract_story
 from ai import generate_storyboard, build_remotion_props, scenes_for_duration
 from motion_planner import plan_motion
 from templates import get_template, TEMPLATE_LIST
 from remotion_bridge import render_remotion_video
+from music_selector import select_music
+from audio_mixer import mix_audio
+from voiceover_provider import get_voiceover_provider
+from visual_mapper import map_visuals
 
 BASE_DIR        = Path(__file__).parent
 SCREENSHOTS_DIR = BASE_DIR / "screenshots"
 OUTPUT_DIR      = BASE_DIR / "output"
+ASSETS_DIR      = BASE_DIR / "assets"
 
 SCREENSHOTS_DIR.mkdir(exist_ok=True)
 OUTPUT_DIR.mkdir(exist_ok=True)
+ASSETS_DIR.mkdir(exist_ok=True)
 
 progress_store: dict[str, dict] = {}
 
@@ -52,6 +58,7 @@ app = FastAPI(title="Promoly API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 app.mount("/output",      StaticFiles(directory=str(OUTPUT_DIR)),      name="output")
 app.mount("/screenshots", StaticFiles(directory=str(SCREENSHOTS_DIR)), name="screenshots")
+app.mount("/assets",      StaticFiles(directory=str(ASSETS_DIR)),      name="assets")
 
 
 class GenerateRequest(BaseModel):
@@ -93,9 +100,10 @@ async def run_pipeline(
     api_key: str | None,
     template_id: str | None = None,
 ) -> dict:
-    session_dir = SCREENSHOTS_DIR / session_id
+    session_dir    = SCREENSHOTS_DIR / session_id
     session_dir.mkdir(parents=True, exist_ok=True)
-    output_path = OUTPUT_DIR / f"{session_id}.mp4"
+    output_path    = OUTPUT_DIR / f"{session_id}.mp4"
+    visual_elements: list = []
 
     # Base URL for screenshot serving (FastAPI /screenshots/<session>/<file>)
     base_url = "http://localhost:8001"
@@ -125,6 +133,11 @@ async def run_pipeline(
             max_sections=max(max_sc + 2, 7),
             progress_cb=_cap_cb,
         )
+
+        # ── Visual element extraction (same browser session) ──────────────────
+        _set(session_id, "capturing", 37, "Extracting visual elements…")
+        visual_elements = await extract_visual_elements(page, session_dir, sections)
+
         await ctx.close()
         await browser.close()
 
@@ -164,8 +177,13 @@ async def run_pipeline(
         video_style  = raw_board.get("video_style",  "explainer"),
     )
 
-    # ── STEP 3b: Motion Planner ───────────────────────────────────────────────
-    _set(session_id, "rendering", 52, "Planning motion…")
+    # ── STEP 3b: Visual Mapping ───────────────────────────────────────────────
+    _set(session_id, "rendering", 51, "Mapping visuals to story…")
+    mapped_scenes = map_visuals(remotion_props.get("scenes", []), visual_elements)
+    remotion_props = {**remotion_props, "scenes": mapped_scenes}
+
+    # ── STEP 3c: Motion Planner ───────────────────────────────────────────────
+    _set(session_id, "rendering", 53, "Planning motion…")
     template = get_template(template_id)
     print(f"[Template] Using template: {template.name} ({template.id})", flush=True)
     remotion_props = plan_motion(remotion_props, sections=sections, meta=meta, template=template)
@@ -181,6 +199,30 @@ async def run_pipeline(
         fps         = FPS,
         progress_cb = _rend_cb,
     )
+
+    # ── STEP 5: Music selection ───────────────────────────────────────────────
+    _set(session_id, "rendering", 84, "Selecting background music…")
+    music_info = select_music(
+        template_id  = template_id,
+        website_type = raw_board.get("website_type"),
+        meta         = meta,
+    )
+
+    # ── STEP 6: Voiceover (stub — future ElevenLabs) ─────────────────────────
+    vo_provider = get_voiceover_provider("stub")
+    vo_path = None
+    # When voiceover is ready:
+    # script = " ".join(s.get("narration","") for s in remotion_props.get("scenes",[]))
+    # vo_path = await vo_provider.generate_voiceover(script)
+
+    # ── STEP 7: Audio mixing ──────────────────────────────────────────────────
+    if music_info["musicPath"] is not None or vo_path is not None:
+        _set(session_id, "rendering", 88, "Mixing audio…")
+        await mix_audio(
+            video_path     = output_path,
+            music_path     = music_info["musicPath"],
+            voiceover_path = vo_path,
+        )
 
     # Cleanup screenshots
     shutil.rmtree(session_dir, ignore_errors=True)
@@ -211,6 +253,10 @@ async def run_pipeline(
         "fps":        FPS,
         "scenes":     n,
         "ai_used":    ai_used,
+        "audio": {
+            "musicCategory": music_info.get("musicCategory"),
+            "musicTrack":    music_info.get("musicTrack"),
+        },
         "storyboard": {
             "website_type": remotion_props.get("websiteType", "saas"),
             "video_style":  remotion_props.get("videoStyle",  "explainer"),

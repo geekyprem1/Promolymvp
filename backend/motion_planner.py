@@ -53,38 +53,54 @@ def _plan_camera(
     scene_index: int,
     total: int,
     template: "BackendTemplateConfig | None" = None,
+    scene: dict | None = None,
 ) -> dict:
     """
     Returns a camera motion dict.  zoomFrom/zoomTo are CSS scale values applied
     to the background image wrapper.  pan values are pixel offsets.
     focusX/Y (0-1) set the transform-origin anchor.
 
-    If a template is provided, use its camera config. Otherwise fall back to
-    the built-in heuristics.
+    Priority:
+      1. Visual mapper coordinates (scene.focusX / scene.focusY) — actual element position
+      2. Template camera config
+      3. Built-in heuristics
     """
+    # Visual mapper override: use real element coordinates when available
+    mapped_fx = scene.get("focusX") if scene else None
+    mapped_fy = scene.get("focusY") if scene else None
+    has_visual_target = scene.get("visualTargetId") if scene else None
+
     if template is not None:
         cam = template.camera_for_scene(scene_type)
-        # For features/benefits, alternate pan direction by scene index
         if scene_type in ("features", "benefits", "content"):
             direction = 1 if scene_index % 2 == 0 else -1
             cam = {**cam, "panX": cam["panX"] * direction}
+        # Inject real focusX/Y from visual mapper if we have a match
+        if has_visual_target and mapped_fx is not None:
+            cam = {**cam, "focusX": mapped_fx, "focusY": mapped_fy}
         return cam
 
-    # ── Built-in heuristics (no template) ────────────────────────────────────
+    # ── Built-in heuristics ───────────────────────────────────────────────────
     base = {"zoomFrom": 1.0, "zoomTo": 1.0, "panX": 0, "panY": 0, "focusX": 0.5, "focusY": 0.5}
 
     if scene_type == "hero":
-        return {**base, "zoomFrom": 1.08, "zoomTo": 1.02, "panX": -20, "focusX": 0.45, "focusY": 0.4}
-    if scene_type == "features":
+        cam = {**base, "zoomFrom": 1.08, "zoomTo": 1.02, "panX": -20, "focusX": 0.45, "focusY": 0.4}
+    elif scene_type == "features":
         direction = 1 if scene_index % 2 == 0 else -1
-        return {**base, "zoomFrom": 1.0, "zoomTo": 1.04, "panX": direction * 18}
-    if scene_type == "benefits":
-        return {**base, "zoomFrom": 1.03, "zoomTo": 1.0, "panX": 15, "panY": -8, "focusX": 0.6}
-    if scene_type == "testimonials":
-        return {**base, "zoomFrom": 1.02, "zoomTo": 1.0, "panY": -12, "focusY": 0.55}
-    if scene_type == "cta":
-        return {**base, "zoomFrom": 0.97, "zoomTo": 1.04, "focusY": 0.65}
-    return base
+        cam = {**base, "zoomFrom": 1.0, "zoomTo": 1.04, "panX": direction * 18}
+    elif scene_type == "benefits":
+        cam = {**base, "zoomFrom": 1.03, "zoomTo": 1.0, "panX": 15, "panY": -8, "focusX": 0.6}
+    elif scene_type == "testimonials":
+        cam = {**base, "zoomFrom": 1.02, "zoomTo": 1.0, "panY": -12, "focusY": 0.55}
+    elif scene_type == "cta":
+        cam = {**base, "zoomFrom": 0.97, "zoomTo": 1.04, "focusY": 0.65}
+    else:
+        cam = base
+
+    # Inject real focusX/Y from visual mapper if available
+    if has_visual_target and mapped_fx is not None:
+        cam = {**cam, "focusX": mapped_fx, "focusY": mapped_fy}
+    return cam
 
 
 # ── Cursor planning ───────────────────────────────────────────────────────────
@@ -110,36 +126,49 @@ def _plan_cursor(
         return disabled
 
     if scene_type == "cta":
-        # Move from lower-left to CTA button, click it
-        button_x, button_y = CX, H * 0.68
+        # Use real button position from visual mapper if available
+        bbox = scene.get("highlightBox") if scene else None
+        if bbox:
+            button_x = bbox["x"] + bbox["width"] // 2
+            button_y = bbox["y"] + bbox["height"] // 2
+        else:
+            button_x, button_y = CX, int(H * 0.68)
         return {
             "enabled": True,
             "showTrail": True,
             "color": "#ffffff",
             "clickAtFrame": int(duration * 0.55),
             "waypoints": [
-                {"x": CX - 280, "y": H * 0.82, "frame": 5},
-                {"x": CX - 100, "y": H * 0.72, "frame": 20},
-                {"x": button_x, "y": button_y, "frame": 40},
-                {"x": button_x, "y": button_y, "frame": duration - 10},
+                {"x": button_x - 280, "y": button_y + 120, "frame": 5},
+                {"x": button_x - 100, "y": button_y + 40,  "frame": 20},
+                {"x": button_x,       "y": button_y,        "frame": 40},
+                {"x": button_x,       "y": button_y,        "frame": duration - 10},
             ],
         }
 
     if scene_type == "features":
-        # Cursor sweeps across feature area
-        reverse = bool(scene.get("reverse", False))
-        start_x = W * 0.72 if not reverse else W * 0.28
-        end_x   = W * 0.82 if not reverse else W * 0.18
+        # Use real card/widget position from visual mapper if available
+        bbox = scene.get("highlightBox") if scene else None
+        if bbox:
+            cx = bbox["x"] + bbox["width"] // 2
+            cy = bbox["y"] + bbox["height"] // 2
+            start_x, end_x = cx - 60, cx + 60
+            start_y = cy
+        else:
+            reverse = bool(scene.get("reverse", False))
+            start_x = int(W * 0.72) if not reverse else int(W * 0.28)
+            end_x   = int(W * 0.82) if not reverse else int(W * 0.18)
+            start_y = int(H * 0.45)
         return {
             "enabled": True,
             "showTrail": True,
             "color": "#ffffff",
             "clickAtFrame": None,
             "waypoints": [
-                {"x": start_x, "y": H * 0.38, "frame": 15},
-                {"x": start_x, "y": H * 0.52, "frame": 35},
-                {"x": end_x,   "y": H * 0.58, "frame": 60},
-                {"x": end_x,   "y": H * 0.58, "frame": duration - 10},
+                {"x": start_x, "y": start_y - 60, "frame": 15},
+                {"x": start_x, "y": start_y,       "frame": 35},
+                {"x": end_x,   "y": start_y + 30,  "frame": 60},
+                {"x": end_x,   "y": start_y + 30,  "frame": duration - 10},
             ],
         }
 
@@ -179,47 +208,45 @@ def _plan_highlights(
 
     exit_frame = duration - 15
 
+    # Use real element bounding box from visual mapper when available
+    bbox = scene.get("highlightBox") if scene else None
+
+    def _from_bbox(color: str, start: int, radius_pad: int = 20) -> dict:
+        """Build a highlight ring centred on the mapped element."""
+        cx = bbox["x"] + bbox["width"] // 2
+        cy = bbox["y"] + bbox["height"] // 2
+        radius = max(40, (max(bbox["width"], bbox["height"]) // 2) + radius_pad)
+        return {"x": cx, "y": cy, "radius": radius,
+                "startFrame": start, "exitFrame": exit_frame, "color": color}
+
     if scene_type == "cta":
-        return [{
-            "x": CX,
-            "y": int(H * 0.68),
-            "radius": 80,
-            "startFrame": 8,
-            "exitFrame": exit_frame,
-            "color": GREEN,
-        }]
+        if bbox:
+            return [_from_bbox(GREEN, 8, 24)]
+        return [{"x": CX, "y": int(H * 0.68), "radius": 80,
+                 "startFrame": 8, "exitFrame": exit_frame, "color": GREEN}]
 
     if scene_type == "features":
+        if bbox:
+            return [_from_bbox(VIOLET, 25, 20)]
         reverse = bool(scene.get("reverse", False))
         img_cx = int(W * 0.72) if not reverse else int(W * 0.28)
-        return [{
-            "x": img_cx,
-            "y": int(H * 0.5),
-            "radius": 90,
-            "startFrame": 25,
-            "exitFrame": exit_frame,
-            "color": VIOLET,
-        }]
+        return [{"x": img_cx, "y": int(H * 0.5), "radius": 90,
+                 "startFrame": 25, "exitFrame": exit_frame, "color": VIOLET}]
 
     if scene_type == "testimonials":
-        return [{
-            "x": CX,
-            "y": int(H * 0.45),
-            "radius": 200,
-            "startFrame": 20,
-            "exitFrame": exit_frame,
-            "color": CYAN,
-        }]
+        if bbox:
+            return [_from_bbox(CYAN, 20, 30)]
+        return [{"x": CX, "y": int(H * 0.45), "radius": 200,
+                 "startFrame": 20, "exitFrame": exit_frame, "color": CYAN}]
 
     if scene_type == "hero":
-        return [{
-            "x": int(W * 0.3),
-            "y": int(H * 0.3),
-            "radius": 120,
-            "startFrame": 40,
-            "exitFrame": exit_frame,
-            "color": ACCENT,
-        }]
+        if bbox:
+            return [_from_bbox(ACCENT, 40, 30)]
+        return [{"x": int(W * 0.3), "y": int(H * 0.3), "radius": 120,
+                 "startFrame": 40, "exitFrame": exit_frame, "color": ACCENT}]
+
+    if scene_type in ("widget", "solution", "benefits") and bbox:
+        return [_from_bbox(ACCENT, 20, 20)]
 
     return []
 
@@ -413,7 +440,7 @@ def plan_motion(
 
         motion_plan = {
             "sceneId":         f"scene_{i}",
-            "camera":          _plan_camera(scene_type, duration, i, total, template),
+            "camera":          _plan_camera(scene_type, duration, i, total, template, scene),
             "cursor":          _plan_cursor(scene_type, duration, scene, i, template),
             "highlights":      _plan_highlights(scene_type, duration, scene, template),
             "badges":          _plan_badges(scene_type, duration, scene, template),
