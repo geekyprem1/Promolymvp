@@ -159,18 +159,143 @@ def design_scene(scene: dict) -> dict:
     }
 
 
-def design_scenes(remotion_props: dict) -> dict:
+def _make_metric_scene(metric: dict, from_frame: int, index: int) -> dict:
+    """
+    Synthesize a 'benefits' scene that showcases a single high-importance metric
+    as a MetricCounter animation.  Called for top metrics from the visual inventory.
+    """
+    value = metric.get("value", "")
+    label = metric.get("label", "")
+    mtype = metric.get("type", "metric")
+
+    # Parse numeric value and suffix for MetricCounter
+    num_match = re.search(r"([\d,\.]+)", value.replace(",", ""))
+    num = float(num_match.group(1)) if num_match else 0
+    suffix = re.sub(r"[\d,\.\s]", "", value).strip()[:4]
+    prefix = "$" if value.startswith("$") else ""
+
+    # Choose headline based on metric type
+    HEADLINE_BY_TYPE = {
+        "uptime":      f"{value} Uptime Guaranteed",
+        "users":       f"{value} Teams Trust Us",
+        "revenue":     f"{value} In Customer Value",
+        "speed":       f"{value} Faster",
+        "growth":      f"{value} Growth",
+        "rating":      f"{value} Customer Rating",
+        "reduction":   f"{value} Cost Reduction",
+        "compliance":  f"{label} Certified",
+        "support":     "Always Available",
+        "requests":    f"{value} Requests Handled",
+    }
+    headline   = HEADLINE_BY_TYPE.get(mtype, f"{value} {label}".strip())[:40]
+    subheadline = f"Real numbers. Real results." if index == 0 else f"Proven performance you can rely on."
+
+    from ai import SCENE_DURATION_FRAMES
+    duration = SCENE_DURATION_FRAMES.get("benefits", 150)
+
+    return {
+        "type":             "benefits",
+        "from":             from_frame,
+        "durationInFrames": duration,
+        "headline":         headline,
+        "subheadline":      subheadline,
+        "badge":            label.upper() if label else "METRIC",
+        "screenshotUrl":    "",
+        "transition":       "slideLeft",
+        "narration":        f"{value} {label}. Not a claim — a fact.".strip(),
+        "bodyText":         f"{value} {label}",
+        "reverse":          index % 2 == 1,
+        "_injectedMetric":  True,
+        "_metricValue":     value,
+        "_metricNum":       num,
+        "_metricSuffix":    suffix,
+        "_metricPrefix":    prefix,
+        "_metricLabel":     label,
+    }
+
+
+def _inject_metric_scenes(scenes: list[dict], inventory_hints: dict) -> list[dict]:
+    """
+    If high-importance metrics exist in the inventory, inject MetricCounter
+    benefit scenes after the solution scene (or after scene 2).
+
+    Rules:
+    - Only inject metrics with importance >= 85
+    - Max 2 injected metric scenes per video
+    - Never inject if the video already has a metric-keyword scene
+    - Insert after "solution" scene, or after index 2
+    """
+    top_metrics = [m for m in inventory_hints.get("top_metrics", []) if m.get("importance", 0) >= 85]
+    if not top_metrics:
+        return scenes
+
+    # Check if Gemini already generated a metric-rich scene
+    has_metric_scene = any(
+        any(kw in (s.get("headline", "") + s.get("bodyText", "")).lower()
+            for kw in ["uptime", "users", "requests", "faster", "reduction"])
+        for s in scenes
+    )
+    if has_metric_scene:
+        return scenes
+
+    # Find insert point: after "solution" or after index 2
+    insert_after = 2
+    for i, s in enumerate(scenes):
+        if s.get("type") == "solution":
+            insert_after = i
+            break
+
+    # Recompute `from` offsets after injection
+    injected = []
+    metrics_to_inject = top_metrics[:2]  # max 2 scenes
+
+    for i, metric in enumerate(metrics_to_inject):
+        from_frame = 0  # recalculated below
+        injected.append(_make_metric_scene(metric, from_frame, i))
+
+    result = scenes[:insert_after + 1] + injected + scenes[insert_after + 1:]
+
+    # Recompute `from` offsets for entire sequence
+    offset = 0
+    for s in result:
+        s["from"] = offset
+        offset += s.get("durationInFrames", 150)
+
+    print(f"[SceneDesigner] Injected {len(injected)} metric scene(s) from visual inventory", flush=True)
+    return result
+
+
+def design_scenes(remotion_props: dict, inventory=None) -> dict:
     """
     Inject a `sceneDesign` dict into every scene in remotion_props.
+    Optionally injects MetricCounter scenes for high-importance metrics.
 
     Called AFTER apply_style(), BEFORE plan_motion().
     Does not mutate the input dict.
     """
     scenes  = remotion_props.get("scenes", [])
-    designed: list[dict] = []
 
+    # Part A: Inject metric scenes from visual inventory
+    if inventory is not None:
+        try:
+            hints = inventory.to_scene_hints()
+            scenes = _inject_metric_scenes(scenes, hints)
+        except Exception as e:
+            print(f"[SceneDesigner] Metric injection skipped: {e}", flush=True)
+
+    # Part B: Design each scene
+    designed: list[dict] = []
     for scene in scenes:
         sd = design_scene(scene)
+
+        # If this is an injected metric scene, override primaryComponent
+        if scene.get("_injectedMetric"):
+            sd["primaryComponent"]  = "MetricCounter"
+            sd["concept"]           = "performance"
+            sd["motionEnergy"]      = "high"
+            sd["accentVariant"]     = "success"
+            sd["badgeTexts"]        = [scene.get("_metricValue",""), scene.get("_metricLabel","")]
+
         designed.append({**scene, "sceneDesign": sd})
         print(
             f"[SceneDesigner] scene={scene.get('type','?'):12s} "

@@ -15,9 +15,11 @@ import sys
 import uuid
 from pathlib import Path
 
-# Windows: Playwright needs ProactorEventLoop for subprocess support
+# Windows: force ProactorEventLoop BEFORE uvicorn touches the event loop
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+    loop = asyncio.ProactorEventLoop()
+    asyncio.set_event_loop(loop)
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
@@ -40,6 +42,8 @@ from audio_mixer import mix_audio
 from voiceover_provider import get_voiceover_provider
 from visual_mapper import map_visuals
 from scene_designer import design_scenes
+from metrics_extractor import build_metrics
+from visual_intelligence import build_visual_inventory
 
 BASE_DIR        = Path(__file__).parent
 SCREENSHOTS_DIR = BASE_DIR / "screenshots"
@@ -63,6 +67,11 @@ app.mount("/screenshots", StaticFiles(directory=str(SCREENSHOTS_DIR)), name="scr
 app.mount("/assets",      StaticFiles(directory=str(ASSETS_DIR)),      name="assets")
 
 
+KOKORO_VALID_VOICES = {
+    "af_heart", "af_nova", "af_sky", "af_bella", "af_jessica", "af_sarah",
+    "am_echo", "am_michael", "am_liam", "bm_george", "bm_daniel",
+}
+
 class GenerateRequest(BaseModel):
     url: str
     session_id: str | None  = None
@@ -70,6 +79,7 @@ class GenerateRequest(BaseModel):
     gemini_api_key: str | None = None
     template_id: str | None = None
     video_style: str | None = None   # "hybrid" (default) | "website-showcase" | "motion-graphics"
+    kokoro_voice: str | None = None  # Kokoro TTS voice ID (default: af_heart)
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -103,11 +113,13 @@ async def run_pipeline(
     api_key: str | None,
     template_id: str | None = None,
     video_style: str | None = None,
+    kokoro_voice: str | None = None,
 ) -> dict:
     session_dir    = SCREENSHOTS_DIR / session_id
     session_dir.mkdir(parents=True, exist_ok=True)
     output_path    = OUTPUT_DIR / f"{session_id}.mp4"
     visual_elements: list = []
+    ranked_metrics:  list = []
 
     # Base URL for screenshot serving (FastAPI /screenshots/<session>/<file>)
     base_url = "http://localhost:8001"
@@ -142,14 +154,30 @@ async def run_pipeline(
         _set(session_id, "capturing", 37, "Extracting visual elements…")
         visual_elements = await extract_visual_elements(page, session_dir, sections)
 
+        # ── Metric extraction (same browser session — needs live DOM) ──────────
+        _set(session_id, "capturing", 39, "Extracting metrics…")
+        try:
+            ranked_metrics = await build_metrics(page, sections)
+        except Exception as e:
+            print(f"[VIE] Metric extraction failed (non-fatal): {e}", flush=True)
+            ranked_metrics = []
+
         await ctx.close()
         await browser.close()
 
     if not sections:
         raise HTTPException(status_code=500, detail="No sections detected on page.")
 
+    # ── Build Visual Inventory from all extracted data ────────────────────────
+    _set(session_id, "analyzing", 40, "Building visual inventory…")
+    try:
+        inventory = build_visual_inventory(sections, visual_elements, ranked_metrics)
+    except Exception as e:
+        print(f"[VIE] Inventory build failed (non-fatal): {e}", flush=True)
+        inventory = None
+
     # ── STEP 2: Story extraction ──────────────────────────────────────────────
-    _set(session_id, "analyzing", 38, "Extracting product story…")
+    _set(session_id, "analyzing", 41, "Extracting product story…")
     story = extract_story(meta, sections)
     print(
         f"[Story] problem={bool(story.problem)} solution={bool(story.solution)} "
@@ -160,7 +188,7 @@ async def run_pipeline(
 
     # ── STEP 3: AI storyboard ─────────────────────────────────────────────────
     _set(session_id, "analyzing", 42, "Gemini AI writing video script…")
-    raw_board = await generate_storyboard(meta, sections, target_duration, api_key, story=story)
+    raw_board = await generate_storyboard(meta, sections, target_duration, api_key, story=story, inventory=inventory)
 
     # If AI was requested but fallback happened — tell frontend
     if api_key and not raw_board.get("ai_used", False):
@@ -193,7 +221,31 @@ async def run_pipeline(
 
     # ── STEP 3c.5: Scene Designer ─────────────────────────────────────────────
     _set(session_id, "rendering", 52, "Designing scenes…")
-    remotion_props = design_scenes(remotion_props)
+    remotion_props = design_scenes(remotion_props, inventory=inventory)
+
+    # ── STEP 3c.6: Hybrid Screenshot Overrides ───────────────────────────────
+    if inventory is not None:
+        try:
+            hints = inventory.to_scene_hints()
+            dash_url  = hints.get("dashboard_screenshot")
+            price_url = hints.get("pricing_screenshot")
+            cta_url   = hints.get("cta_screenshot")
+            def _full_url(rel):
+                return f"{base_url}/{rel}" if rel and not rel.startswith("http") else rel
+
+            updated = []
+            for s in remotion_props.get("scenes", []):
+                stype = s.get("type", "")
+                if stype in ("features", "solution") and dash_url and not s.get("screenshotUrl"):
+                    s = {**s, "screenshotUrl": _full_url(dash_url)}
+                elif stype == "pricing" and price_url and not s.get("screenshotUrl"):
+                    s = {**s, "screenshotUrl": _full_url(price_url)}
+                elif stype == "cta" and cta_url and not s.get("screenshotUrl"):
+                    s = {**s, "screenshotUrl": _full_url(cta_url)}
+                updated.append(s)
+            remotion_props = {**remotion_props, "scenes": updated}
+        except Exception as e:
+            print(f"[VIE] Hybrid screenshot override failed (non-fatal): {e}", flush=True)
 
     # ── STEP 3d: Motion Planner ───────────────────────────────────────────────
     _set(session_id, "rendering", 53, "Planning motion…")
@@ -221,14 +273,54 @@ async def run_pipeline(
         meta         = meta,
     )
 
-    # ── STEP 6: Voiceover (stub — future ElevenLabs) ─────────────────────────
-    vo_provider = get_voiceover_provider("stub")
+    # ── STEP 6: Voiceover (Kokoro via OpenRouter) ────────────────────────────
+    # Use request-provided key first (user's browser key), then env fallback
+    openrouter_key = api_key or os.getenv("OPENROUTER_API_KEY") or os.getenv("GEMINI_API_KEY")
+    voice = kokoro_voice if kokoro_voice in KOKORO_VALID_VOICES else "af_heart"
     vo_path = None
-    # When voiceover is ready:
-    # script = " ".join(s.get("narration","") for s in remotion_props.get("scenes",[]))
-    # vo_path = await vo_provider.generate_voiceover(script)
+    if openrouter_key:
+        _set(session_id, "rendering", 86, f"Generating voiceover ({voice})…")
+        vo_provider = get_voiceover_provider(
+            "kokoro",
+            api_key    = openrouter_key,
+            output_dir = OUTPUT_DIR,
+            voice      = voice,
+        )
+        _scenes = remotion_props.get("scenes", [])
+        narrations = [
+            s.get("narration", "").strip()
+            for s in _scenes
+            if s.get("narration", "").strip()
+        ]
+        # Fallback: Gemini ne narration nahi diya — headline+subheadline se banao
+        if not narrations:
+            print("[Voiceover] No narration from AI — building from headlines", flush=True)
+            for s in _scenes:
+                h  = s.get("headline", "").strip()
+                sh = s.get("subheadline", "").strip()
+                line = f"{h}. {sh}" if sh else h
+                if line.strip():
+                    narrations.append(line[:120])
+        print(f"[Voiceover] {len(narrations)} narration lines across {len(_scenes)} scenes", flush=True)
+        script = ". ".join(narrations)
+
+        if script:
+            try:
+                vo_path = await vo_provider.generate_voiceover(
+                    script,
+                    output_path = OUTPUT_DIR / f"{session_id}_vo.mp3",
+                )
+                print(f"[Voiceover] vo_path = {vo_path}", flush=True)
+            except Exception as e:
+                print(f"[Voiceover] Exception (non-fatal): {type(e).__name__}: {e}", flush=True)
+                vo_path = None
+        else:
+            print("[Voiceover] Script is empty — no narration in scenes", flush=True)
+    else:
+        print("[Voiceover] No OPENROUTER_API_KEY found — skipping voiceover.", flush=True)
 
     # ── STEP 7: Audio mixing ──────────────────────────────────────────────────
+    print(f"[Audio] music={music_info.get('musicPath')}  vo={vo_path}", flush=True)
     if music_info["musicPath"] is not None or vo_path is not None:
         _set(session_id, "rendering", 88, "Mixing audio…")
         await mix_audio(
@@ -299,13 +391,16 @@ async def generate_video(req: GenerateRequest):
     try:
         return await run_pipeline(
             url, sid, req.target_duration, api_key,
-            req.template_id, req.video_style,
+            req.template_id, req.video_style, req.kokoro_voice,
         )
     except HTTPException:
         raise
     except Exception as exc:
+        import traceback
+        tb = traceback.format_exc()
+        print(f"[ERROR] {tb}", flush=True)
         progress_store.pop(sid, None)
-        raise HTTPException(status_code=500, detail=str(exc)[:400])
+        raise HTTPException(status_code=500, detail=tb[-600:])
 
 
 @app.get("/progress/{session_id}")
@@ -326,3 +421,55 @@ async def list_styles():
 @app.get("/health")
 async def health():
     return {"status": "ok", "engine": "remotion"}
+
+
+class VoiceTestRequest(BaseModel):
+    api_key: str
+    text: str = "Hello, this is a voiceover test from Promoly."
+    voice: str = "af_heart"
+
+@app.post("/test-voice")
+async def test_voice(req: VoiceTestRequest):
+    """Quick endpoint to test Kokoro TTS without running the full pipeline."""
+    import httpx
+    key = req.api_key.strip()
+    if not key:
+        raise HTTPException(status_code=400, detail="api_key required")
+    voice = req.voice if req.voice in KOKORO_VALID_VOICES else "af_heart"
+    payload = {"model": "hexgrad/kokoro-82m", "input": req.text, "voice": voice}
+    headers = {
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://promoly.app",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                "https://openrouter.ai/api/v1/audio/speech",
+                headers=headers, json=payload,
+            )
+        ct = resp.headers.get("content-type", "")
+        if resp.status_code != 200 or "json" in ct:
+            return {
+                "ok": False,
+                "status": resp.status_code,
+                "content_type": ct,
+                "error": resp.text[:400],
+            }
+        out = OUTPUT_DIR / "voice_test.mp3"
+        out.write_bytes(resp.content)
+        return {
+            "ok": True,
+            "bytes": len(resp.content),
+            "content_type": ct,
+            "audio_url": f"/output/voice_test.mp3",
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+if __name__ == "__main__":
+    import uvicorn
+    if sys.platform == "win32":
+        asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+    uvicorn.run("main:app", host="0.0.0.0", port=8001, reload=True, loop="none")

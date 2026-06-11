@@ -118,6 +118,7 @@ def _build_story_prompt(
     meta: dict,
     sections: list["SectionData"],
     n_scenes: int,
+    inventory=None,   # VisualInventory | None
 ) -> str:
     """
     Story-arc based prompt.  Sends the extracted marketing narrative to Gemini
@@ -151,6 +152,7 @@ def _build_story_prompt(
       "badge": "THE PROBLEM",
       "section": "hero",
       "painPoints": ["12 disconnected tools", "Endless status meetings", "Missed deadlines"],
+      "narration": "Too many tools, too little time — teams are burning out on busywork.",
       "transition": "dissolve"
     },
     {
@@ -160,6 +162,7 @@ def _build_story_prompt(
       "badge": "THE SOLUTION",
       "section": "features",
       "checkpoints": ["Instant setup", "Works with your stack", "Ship in days not weeks"],
+      "narration": "One platform replaces your entire toolstack and gets your team moving fast.",
       "transition": "zoomIn"
     },
     {
@@ -169,6 +172,7 @@ def _build_story_prompt(
       "badge": "BENEFITS",
       "section": "features",
       "bullets": ["Automate repetitive tasks", "Real-time collaboration", "One-click deploys"],
+      "narration": "Built for speed — automate the busywork and ship features your users love.",
       "reverse": false,
       "bodyText": "",
       "transition": "slideLeft"
@@ -181,6 +185,7 @@ def _build_story_prompt(
       "section": "cta",
       "ctaLabel": "Start Free",
       "domain": "example.com",
+      "narration": "Start free today and join thousands of teams already shipping faster.",
       "transition": "zoomIn"
     }
   ]
@@ -188,13 +193,22 @@ def _build_story_prompt(
 
     valid_section_types = [s.section_type for s in sections]
 
+    # Visual inventory block (only when inventory is provided and non-empty)
+    inventory_block = ""
+    if inventory is not None:
+        try:
+            inventory_block = "\n" + inventory.to_prompt_block() + "\n"
+        except Exception:
+            inventory_block = ""
+
     return (
         "You are an expert marketing video director specialising in SaaS conversion videos.\n"
         "Your job is to write a video script that SELLS — not one that describes a website.\n\n"
         "──────────────────────────────────────────\n"
         "EXTRACTED PRODUCT STORY\n"
         "──────────────────────────────────────────\n"
-        f"{story.to_prompt_block()}\n\n"
+        f"{story.to_prompt_block()}\n"
+        f"{inventory_block}"
         "WEBSITE CONTEXT\n"
         f"URL:   {meta.get('url', '')}\n"
         f"Title: {meta.get('title', '')}\n"
@@ -218,7 +232,7 @@ def _build_story_prompt(
         "7. For 'proof' type: add 'quote', 'author', 'company'.\n"
         "8. For 'cta' type: add 'ctaLabel' (action phrase, max 4 words) and 'domain'.\n"
         "9. badge: 1–3 word CAPS label describing the scene's role (e.g. 'THE PROBLEM').\n"
-        "13. Add 'narration': one sentence (max 20 words) to be spoken aloud for each scene.\n"
+        "13. REQUIRED: Every scene MUST have 'narration': one punchy sentence (10-18 words) for text-to-speech voiceover. Do not skip this field.\n"
         f"10. 'section' must be one of: {valid_section_types}\n"
         "11. Write for OUTCOMES and TRANSFORMATION, not feature lists.\n"
         "12. Use the extracted metrics and social proof where they fit naturally.\n\n"
@@ -713,6 +727,7 @@ async def generate_storyboard(
     target_duration: int = 20,
     api_key: str | None  = None,
     story: "StoryData | None" = None,
+    inventory=None,   # VisualInventory | None
 ) -> dict:
     n_scenes = scenes_for_duration(target_duration)
     n_scenes = min(n_scenes, len(sections)) if sections else 2
@@ -730,7 +745,7 @@ async def generate_storyboard(
 
     try:
         if use_story_prompt:
-            prompt = _build_story_prompt(story, meta, sections, n_scenes)
+            prompt = _build_story_prompt(story, meta, sections, n_scenes, inventory=inventory)
         else:
             prompt = _build_section_prompt(meta, sections, n_scenes)
 

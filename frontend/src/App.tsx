@@ -147,6 +147,8 @@ export default function App() {
   const [geminiKey, setGeminiKey]         = useState(() => localStorage.getItem("openrouter_key") || "");
   const [keySaved, setKeySaved]           = useState(!!localStorage.getItem("openrouter_key"));
   const [showAdvanced, setShowAdvanced]   = useState(false);
+  const [voiceTestState, setVoiceTestState] = useState<"idle"|"testing"|"ok"|"fail">("idle");
+  const [voiceTestMsg, setVoiceTestMsg]   = useState("");
   const [targetDuration, setTargetDuration] = useState(20);
   const [stage, setStage]                 = useState<Stage>("idle");
   const [liveMsg, setLiveMsg]             = useState("");
@@ -171,6 +173,9 @@ export default function App() {
     { id: "startup",     name: "Startup Pitch", description: "High energy, bouncy, stats-forward" },
     { id: "minimal",     name: "Minimal",       description: "Light background, static camera" },
   ]);
+  const [kokoroVoice, setKokoroVoice]     = useState<string>(() =>
+    localStorage.getItem("promoly_voice") || "af_heart"
+  );
   const [videoStyle, setVideoStyle]       = useState<string>(() =>
     localStorage.getItem("promoly_style") || "hybrid"
   );
@@ -195,6 +200,11 @@ export default function App() {
   const selectStyle = (id: string) => {
     setVideoStyle(id);
     localStorage.setItem("promoly_style", id);
+  };
+
+  const selectVoice = (id: string) => {
+    setKokoroVoice(id);
+    localStorage.setItem("promoly_voice", id);
   };
 
   // Fetch template + style lists from backend (non-blocking, updates if different)
@@ -260,6 +270,7 @@ export default function App() {
           gemini_api_key: withKey ? (geminiKey.trim() || undefined) : undefined,
           template_id: templateId,
           video_style: videoStyle,
+          kokoro_voice: kokoroVoice,
         }),
       });
       stopPolling();
@@ -324,6 +335,33 @@ export default function App() {
     if (r === "invalid_api_key") return "API key invalid or expired";
     return r;
   };
+
+  async function handleVoiceTest() {
+    const key = geminiKey.trim();
+    if (!key) { setVoiceTestMsg("Key daalo pehle"); setVoiceTestState("fail"); return; }
+    setVoiceTestState("testing"); setVoiceTestMsg("");
+    try {
+      const res = await fetch("/test-voice", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ api_key: key, voice: kokoroVoice, text: "Hello from Promoly. This is a voiceover test." }),
+      });
+      const d = await res.json();
+      if (d.ok) {
+        setVoiceTestState("ok");
+        setVoiceTestMsg(`✓ ${(d.bytes/1024).toFixed(1)} KB audio generated`);
+        // Play the test audio
+        const a = new Audio(d.audio_url);
+        a.play().catch(() => {});
+      } else {
+        setVoiceTestState("fail");
+        setVoiceTestMsg(d.error?.slice(0,120) || "Failed");
+      }
+    } catch(e) {
+      setVoiceTestState("fail");
+      setVoiceTestMsg("Network error");
+    }
+  }
 
   const sliderPct = ((targetDuration - 8) / 22) * 100;
 
@@ -606,6 +644,61 @@ export default function App() {
             </div>
           </div>
 
+          {/* Voice Picker */}
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+              <label style={{ fontSize: 9, color: t.textDim, letterSpacing: "0.2em" }}>VOICEOVER</label>
+              <span style={{ fontSize: 9, color: t.textDim, letterSpacing: "0.1em" }}>// KOKORO-82M · OPENROUTER</span>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6 }}>
+              {([
+                { id: "af_heart",   label: "HEART",   desc: "Female · Warm",     tag: "★" },
+                { id: "af_nova",    label: "NOVA",    desc: "Female · Clear",    tag: "F" },
+                { id: "af_sky",     label: "SKY",     desc: "Female · Bright",   tag: "F" },
+                { id: "am_echo",    label: "ECHO",    desc: "Male · Clear",      tag: "M" },
+                { id: "am_michael", label: "MICHAEL", desc: "Male · Deep",       tag: "M" },
+                { id: "bm_george",  label: "GEORGE",  desc: "Male · British",    tag: "M" },
+              ] as { id: string; label: string; desc: string; tag: string }[]).map(v => {
+                const isSelected = kokoroVoice === v.id;
+                const isFemale = v.id.startsWith("a") && v.id[1] === "f";
+                const dotColor = isFemale ? "#a78bfa" : "#60a5fa";
+                return (
+                  <button
+                    key={v.id}
+                    onClick={() => selectVoice(v.id)}
+                    disabled={isLoading}
+                    title={v.desc}
+                    style={{
+                      position: "relative",
+                      background: isSelected ? (themeKey === "dark" ? "#111" : "#fff") : "transparent",
+                      border: isSelected ? `1px solid ${dotColor}` : `1px solid ${t.border}`,
+                      cursor: isLoading ? "not-allowed" : "pointer",
+                      padding: "9px 8px 8px",
+                      textAlign: "center",
+                      transition: "all 0.15s",
+                      opacity: isLoading ? 0.5 : 1,
+                    }}
+                    onMouseEnter={e => { if (!isLoading) e.currentTarget.style.borderColor = dotColor; }}
+                    onMouseLeave={e => { if (!isLoading) e.currentTarget.style.borderColor = isSelected ? dotColor : t.border; }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 5, marginBottom: 3 }}>
+                      <div style={{ width: 5, height: 5, borderRadius: "50%", background: isSelected ? dotColor : t.textDimmer, flexShrink: 0 }}/>
+                      <span style={{
+                        fontSize: 8, fontWeight: 700, letterSpacing: "0.08em",
+                        color: isSelected ? dotColor : t.textMuted,
+                        fontFamily: "'Space Mono', monospace",
+                      }}>{v.label}</span>
+                    </div>
+                    <div style={{ fontSize: 8, color: t.textDimmer, fontFamily: "'Inter', sans-serif", letterSpacing: "0.02em" }}>{v.desc}</div>
+                    {isSelected && (
+                      <div style={{ position: "absolute", top: 3, right: 5, fontSize: 7, color: dotColor, fontFamily: "'Space Mono', monospace" }}>✓</div>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           {/* Advanced */}
           <div>
             <button onClick={() => setShowAdvanced(v => !v)}
@@ -658,11 +751,39 @@ export default function App() {
                     : <span style={{ fontSize: 9, color: t.textDim, letterSpacing: "0.1em" }}>GET KEY AT OPENROUTER.AI/KEYS</span>
                   }
                   {geminiKey && (
-                    <button onClick={() => { localStorage.removeItem("openrouter_key"); setGeminiKey(""); setKeySaved(false); }}
+                    <button onClick={() => { localStorage.removeItem("openrouter_key"); setGeminiKey(""); setKeySaved(false); setVoiceTestState("idle"); setVoiceTestMsg(""); }}
                       style={{ background: "none", border: "none", cursor: "pointer", padding: 0, fontSize: 9, color: t.accent, letterSpacing: "0.1em", fontFamily: "'Space Mono', monospace" }}
                     >CLEAR</button>
                   )}
                 </div>
+
+                {/* Voice test button */}
+                {geminiKey && (
+                  <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 10 }}>
+                    <button
+                      onClick={handleVoiceTest}
+                      disabled={voiceTestState === "testing"}
+                      style={{
+                        padding: "8px 14px", fontSize: 9, fontWeight: 700,
+                        letterSpacing: "0.1em", cursor: voiceTestState === "testing" ? "not-allowed" : "pointer",
+                        fontFamily: "'Space Mono', monospace",
+                        background: "transparent",
+                        border: `1px solid ${voiceTestState === "ok" ? t.green : voiceTestState === "fail" ? t.accent : t.border}`,
+                        color: voiceTestState === "ok" ? t.green : voiceTestState === "fail" ? t.accent : t.textMuted,
+                        display: "flex", alignItems: "center", gap: 6, transition: "all 0.15s",
+                      }}
+                    >
+                      {voiceTestState === "testing" ? <><Spinner size={10}/> TESTING…</> : "▶ TEST VOICE"}
+                    </button>
+                    {voiceTestMsg && (
+                      <span style={{
+                        fontSize: 9, letterSpacing: "0.08em",
+                        color: voiceTestState === "ok" ? t.green : t.accent,
+                        fontFamily: "'Space Mono', monospace",
+                      }}>{voiceTestMsg}</span>
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </div>
