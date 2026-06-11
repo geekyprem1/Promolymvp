@@ -6,7 +6,7 @@ Sits between apply_style() and plan_motion() in the pipeline.
 Input  : remotion_props (scenes with componentType/componentRole already set)
 Output : same shape, each scene gains a `sceneDesign` dict describing:
             concept            – detected primary concept ("growth", "security", …)
-            visualMetaphor     – specific visual treatment ("growth-chart", "shield", …)
+            visualMetaphor     – specific visual treatment ("rocket", "shield", …)
             primaryComponent   – hero Remotion component name
             secondaryComponents – supporting components list
             background         – background component name
@@ -14,254 +14,46 @@ Output : same shape, each scene gains a `sceneDesign` dict describing:
             density            – "minimal" | "standard" | "dense"
             accentVariant      – "default" | "success" | "warning" | "danger"
             badgeTexts         – suggested badge chip labels
+            motionIntensity    – 0.0-1.0 float for Remotion metaphor component
 
 The design drives:
   • motion_planner.py  – motionComponent selection + zoom/badge intensity
-  • MotionGraphicsScene.tsx – layout variant within each scene type
+  • MotionGraphicsScene.tsx – layout variant + MetaphorRenderer
 """
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field, asdict
 
-# ── Concept keyword taxonomy ──────────────────────────────────────────────────
-# Maps concept name → trigger words (case-insensitive, partial match)
-
-CONCEPT_KEYWORDS: dict[str, list[str]] = {
-    "speed": [
-        "fast", "speed", "instant", "quick", "rapid", "10x", "2x", "3x",
-        "save time", "minutes", "seconds", "accelerate", "boost", "lightning",
-        "real-time", "realtime", "zero latency", "latency",
-    ],
-    "growth": [
-        "scale", "grow", "growth", "increase", "expand", "revenue", "mrr",
-        "users", "traffic", "10x", "100x", "rocket", "skyrocket", "upward",
-        "trend", "chart", "more customers", "acquisition",
-    ],
-    "security": [
-        "secure", "security", "safe", "protect", "privacy", "encrypt",
-        "compliant", "compliance", "soc 2", "gdpr", "hipaa", "trust",
-        "zero trust", "end-to-end", "lock", "shield", "vault",
-    ],
-    "automation": [
-        "automate", "automation", "automatic", "workflow", "hands-free",
-        "no-code", "low-code", "ai", "ai-powered", "trigger", "integrate",
-        "connect", "pipeline", "orchestrate", "schedule", "sync",
-    ],
-    "savings": [
-        "save", "cost", "price", "affordable", "roi", "return", "cut costs",
-        "reduce", "cheaper", "free", "trial", "money", "budget", "spend",
-    ],
-    "simplicity": [
-        "simple", "easy", "one-click", "intuitive", "drag", "drop",
-        "minutes to set up", "no coding", "effortless", "just works",
-        "out of the box", "plug and play",
-    ],
-    "social_proof": [
-        "customers", "trusted", "review", "rating", "stars", "testimonial",
-        "case study", "users love", "join", "teams use", "companies",
-    ],
-    "performance": [
-        "uptime", "reliable", "99%", "sla", "performance", "throughput",
-        "requests", "concurrent", "handles", "never goes down",
-    ],
-    "collaboration": [
-        "team", "collaborate", "share", "together", "workspace", "invite",
-        "comment", "assign", "mention", "slack", "notification",
-    ],
-    "analytics": [
-        "analytics", "data", "insight", "dashboard", "report", "metric",
-        "track", "measure", "monitor", "graph", "chart", "kpi",
-    ],
-}
-
-# Scene-type concept priors — when no strong signal from text, use these
-SCENE_TYPE_CONCEPT: dict[str, str] = {
-    "hook":         "growth",
-    "problem":      "simplicity",
-    "solution":     "simplicity",
-    "features":     "performance",
-    "benefits":     "growth",
-    "testimonials": "social_proof",
-    "cta":          "growth",
-    "hero":         "growth",
-    "content":      "performance",
-}
-
-# ── Visual metaphor lookup ────────────────────────────────────────────────────
-# Maps concept → list of candidate metaphors (first is preferred)
-
-CONCEPT_METAPHORS: dict[str, list[str]] = {
-    "speed":        ["speed-lines",    "progress-bar",   "clock"],
-    "growth":       ["growth-chart",   "upward-trend",   "rocket"],
-    "security":     ["shield",         "lock-badge",     "trust-card"],
-    "automation":   ["workflow-nodes", "gear",           "connected-flow"],
-    "savings":      ["metric-counter", "roi-chart",      "badge-savings"],
-    "simplicity":   ["step-flow",      "checkmarks",     "progress-bar"],
-    "social_proof": ["quote-card",     "star-rating",    "verified-badge"],
-    "performance":  ["metric-counter", "uptime-bar",     "pulse-graph"],
-    "collaboration": ["user-avatars",  "activity-feed",  "checkmarks"],
-    "analytics":    ["growth-chart",   "metric-counter", "uptime-bar"],
-}
-
-# ── Component prescriptions per metaphor ──────────────────────────────────────
-
-@dataclass
-class ComponentPrescription:
-    primary: str
-    secondary: list[str]
-    background: str
-    energy: str          # "low" | "medium" | "high" | "explosive"
-    density: str         # "minimal" | "standard" | "dense"
-    accent: str          # "default" | "success" | "warning" | "danger"
-
-METAPHOR_COMPONENTS: dict[str, ComponentPrescription] = {
-    # ── Speed ──
-    "speed-lines": ComponentPrescription(
-        primary="MetricCounter", secondary=["FloatingBadge", "ProgressBar"],
-        background="AnimatedGrid", energy="high", density="standard", accent="default",
-    ),
-    "progress-bar": ComponentPrescription(
-        primary="ProgressBar", secondary=["MetricCounter", "FloatingBadge"],
-        background="AnimatedGrid", energy="medium", density="standard", accent="default",
-    ),
-    "clock": ComponentPrescription(
-        primary="MetricCounter", secondary=["FloatingBadge"],
-        background="ParticleField", energy="high", density="minimal", accent="default",
-    ),
-
-    # ── Growth ──
-    "growth-chart": ComponentPrescription(
-        primary="MetricCounter", secondary=["FloatingBadge", "ProgressBar"],
-        background="ParticleField", energy="high", density="dense", accent="success",
-    ),
-    "upward-trend": ComponentPrescription(
-        primary="MetricCounter", secondary=["FloatingBadge"],
-        background="ParticleField", energy="explosive", density="dense", accent="success",
-    ),
-    "rocket": ComponentPrescription(
-        primary="KineticHeadline", secondary=["MetricCounter", "FloatingBadge"],
-        background="ParticleField", energy="explosive", density="dense", accent="success",
-    ),
-
-    # ── Security ──
-    "shield": ComponentPrescription(
-        primary="FeatureCard", secondary=["FloatingBadge", "TrustBadge"],
-        background="AnimatedGrid", energy="low", density="standard", accent="default",
-    ),
-    "lock-badge": ComponentPrescription(
-        primary="FeatureCard", secondary=["FloatingBadge"],
-        background="AnimatedGrid", energy="low", density="minimal", accent="default",
-    ),
-    "trust-card": ComponentPrescription(
-        primary="FeatureCard", secondary=["FloatingBadge", "ProgressBar"],
-        background="AnimatedGrid", energy="medium", density="standard", accent="default",
-    ),
-
-    # ── Automation ──
-    "workflow-nodes": ComponentPrescription(
-        primary="FeatureCard", secondary=["FloatingBadge", "ProgressBar"],
-        background="AnimatedGrid", energy="medium", density="dense", accent="default",
-    ),
-    "gear": ComponentPrescription(
-        primary="FeatureCard", secondary=["FloatingBadge"],
-        background="AnimatedGrid", energy="medium", density="standard", accent="default",
-    ),
-    "connected-flow": ComponentPrescription(
-        primary="FeatureCard", secondary=["FloatingBadge", "ProgressBar"],
-        background="AnimatedGrid", energy="high", density="dense", accent="default",
-    ),
-
-    # ── Savings ──
-    "metric-counter": ComponentPrescription(
-        primary="MetricCounter", secondary=["FloatingBadge", "ProgressBar"],
-        background="ParticleField", energy="high", density="standard", accent="success",
-    ),
-    "roi-chart": ComponentPrescription(
-        primary="MetricCounter", secondary=["ProgressBar", "FloatingBadge"],
-        background="ParticleField", energy="high", density="dense", accent="success",
-    ),
-    "badge-savings": ComponentPrescription(
-        primary="FloatingBadge", secondary=["MetricCounter"],
-        background="GlowBackground", energy="medium", density="minimal", accent="success",
-    ),
-
-    # ── Simplicity ──
-    "step-flow": ComponentPrescription(
-        primary="FeatureCard", secondary=["ProgressBar", "FloatingBadge"],
-        background="AnimatedGrid", energy="medium", density="standard", accent="default",
-    ),
-    "checkmarks": ComponentPrescription(
-        primary="FeatureCard", secondary=["FloatingBadge"],
-        background="GlowBackground", energy="medium", density="standard", accent="success",
-    ),
-
-    # ── Social proof ──
-    "quote-card": ComponentPrescription(
-        primary="QuoteCard", secondary=["StarRating", "FloatingBadge"],
-        background="GlowBackground", energy="low", density="minimal", accent="default",
-    ),
-    "star-rating": ComponentPrescription(
-        primary="QuoteCard", secondary=["StarRating", "FloatingBadge"],
-        background="ParticleField", energy="medium", density="standard", accent="default",
-    ),
-    "verified-badge": ComponentPrescription(
-        primary="QuoteCard", secondary=["FloatingBadge"],
-        background="GlowBackground", energy="low", density="minimal", accent="default",
-    ),
-
-    # ── Performance ──
-    "uptime-bar": ComponentPrescription(
-        primary="MetricCounter", secondary=["ProgressBar", "FloatingBadge"],
-        background="AnimatedGrid", energy="high", density="dense", accent="default",
-    ),
-    "pulse-graph": ComponentPrescription(
-        primary="MetricCounter", secondary=["FloatingBadge"],
-        background="ParticleField", energy="high", density="standard", accent="default",
-    ),
-
-    # ── Collaboration ──
-    "user-avatars": ComponentPrescription(
-        primary="FeatureCard", secondary=["FloatingBadge", "MetricCounter"],
-        background="GlowBackground", energy="medium", density="standard", accent="default",
-    ),
-    "activity-feed": ComponentPrescription(
-        primary="FeatureCard", secondary=["FloatingBadge"],
-        background="AnimatedGrid", energy="medium", density="dense", accent="default",
-    ),
-
-    # ── Analytics ──
-}
-
-# Fallback prescription
-_DEFAULT_PRESCRIPTION = ComponentPrescription(
-    primary="FeatureCard", secondary=["FloatingBadge"],
-    background="GlowBackground", energy="medium", density="standard", accent="default",
+from visual_metaphors import (
+    CONCEPT_KEYWORDS,
+    CONCEPT_METAPHORS,
+    SCENE_TYPE_CONCEPT,
+    resolve_metaphor,
 )
 
-# ── Badge text suggestions per concept ────────────────────────────────────────
+# ── Scene-level energy overrides ──────────────────────────────────────────────
+SCENE_TYPE_ENERGY_OVERRIDE: dict[str, str] = {
+    "hook":         "explosive",
+    "cta":          "high",
+    "testimonials": "low",
+    "problem":      "medium",
+}
 
+# ── Badge text suggestions per concept ────────────────────────────────────────
 CONCEPT_BADGES: dict[str, list[str]] = {
     "speed":        ["Instant", "10× Faster", "Real-Time"],
     "growth":       ["Scale Up", "Growing Fast", "Top Rated"],
     "security":     ["Trusted", "SOC 2", "Secure"],
     "automation":   ["Automated", "Zero Manual Work", "AI-Powered"],
+    "ai":           ["AI-Powered", "Intelligent", "Next-Gen"],
     "savings":      ["Save 40%", "Free Trial", "ROI Proven"],
     "simplicity":   ["Easy Setup", "No Code", "5 Min Setup"],
     "social_proof": ["Verified", "5-Star", "10K+ Users"],
     "performance":  ["99.9% Uptime", "Enterprise Grade", "Reliable"],
-    "collaboration": ["Team Ready", "Collaborate", "Share Instantly"],
+    "collaboration":["Team Ready", "Collaborate", "Share Instantly"],
     "analytics":    ["Data-Driven", "Live Insights", "Real-Time"],
-}
-
-# ── Scene-level energy overrides ──────────────────────────────────────────────
-# Force certain scene types to specific energy regardless of concept
-
-SCENE_TYPE_ENERGY_OVERRIDE: dict[str, str] = {
-    "hook":         "explosive",   # opener must grab attention
-    "cta":          "high",        # CTA must feel urgent
-    "testimonials": "low",         # testimonials should feel authentic/calm
-    "problem":      "medium",      # problem should feel tense but not chaotic
+    "scale":        ["Global", "Millions Served", "Enterprise"],
+    "trust":        ["Trusted", "Certified", "Verified"],
 }
 
 # ── Scorer ────────────────────────────────────────────────────────────────────
@@ -346,23 +138,24 @@ def design_scene(scene: dict) -> dict:
     """
     scene_type = scene.get("type", "hero")
 
-    concept  = _detect_concept(scene)
-    metaphor = _pick_metaphor(concept, scene_type)
-    pres     = METAPHOR_COMPONENTS.get(metaphor, _DEFAULT_PRESCRIPTION)
+    concept = _detect_concept(scene)
+    spec    = resolve_metaphor(concept, scene_type)
 
     # Apply scene-type energy override
-    energy = SCENE_TYPE_ENERGY_OVERRIDE.get(scene_type, pres.energy)
+    energy = SCENE_TYPE_ENERGY_OVERRIDE.get(scene_type, spec.energy)
 
     return {
         "concept":             concept,
-        "visualMetaphor":      metaphor,
-        "primaryComponent":    pres.primary,
-        "secondaryComponents": pres.secondary,
-        "background":          pres.background,
+        "visualMetaphor":      spec.id,
+        "metaphorComponent":   spec.component,   # Remotion SVG animation component
+        "primaryComponent":    spec.primary_component,
+        "secondaryComponents": spec.secondary_components,
+        "background":          spec.background,
         "motionEnergy":        energy,
-        "density":             pres.density,
-        "accentVariant":       pres.accent,
+        "density":             spec.density,
+        "accentVariant":       spec.accent,
         "badgeTexts":          _suggest_badges(concept, scene),
+        "motionIntensity":     spec.motion_intensity,
     }
 
 

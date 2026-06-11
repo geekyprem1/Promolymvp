@@ -33,3 +33,15 @@ export type { ParticleFieldProps } from "./ParticleField";
 
 export { AnimatedGrid } from "./AnimatedGrid";
 export type { AnimatedGridProps } from "./AnimatedGrid";
+
+export {
+  RocketAnimation,
+  GrowthChart,
+  ShieldVisual,
+  WorkflowNodes,
+  SpeedLines,
+  NeuralNetwork,
+  StarBurst,
+  ExpandingCircles,
+  MetaphorRenderer,
+} from "./metaphors";

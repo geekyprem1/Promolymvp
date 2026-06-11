@@ -13,6 +13,7 @@ import { FloatingBadge } from "../components/motionlib/FloatingBadge";
 import { ProgressBar } from "../components/motionlib/ProgressBar";
 import { ParticleField } from "../components/motionlib/ParticleField";
 import { AnimatedGrid } from "../components/motionlib/AnimatedGrid";
+import { MetaphorRenderer } from "../components/motionlib/metaphors/MetaphorRenderer";
 import { GlowBackground } from "../components/GlowBackground";
 import { easeOutCubic, easeOutBack } from "../lib/easing";
 import { useTemplate } from "../lib/templates";
@@ -221,6 +222,18 @@ const FeatureGrid: React.FC<{ scene: AnySceneProps }> = ({ scene }) => {
           )}
         </div>
 
+        {/* Visual metaphor — concept-specific animation */}
+        {sd?.metaphorComponent && (
+          <div style={{ position: "absolute", top: "50%", right: 80, transform: "translateY(-50%)", zIndex: 1, opacity: 0.25 }}>
+            <MetaphorRenderer
+              metaphorComponent={sd.metaphorComponent}
+              intensity={sd.motionIntensity ?? 0.7}
+              startFrame={8}
+              size={220}
+            />
+          </div>
+        )}
+
         {/* Cards row — stagger speed controlled by motionEnergy */}
         <div style={{ display: "flex", gap: 28, justifyContent: "center", alignItems: "flex-start" }}>
           {items.map((text: string, i: number) => {
@@ -351,6 +364,18 @@ const BenefitGrid: React.FC<{ scene: AnySceneProps }> = ({ scene }) => {
             </p>
           )}
         </div>
+
+        {/* Visual metaphor */}
+        {sd?.metaphorComponent && (
+          <div style={{ position: "absolute", bottom: 60, right: 80, zIndex: 1, opacity: 0.2 }}>
+            <MetaphorRenderer
+              metaphorComponent={sd.metaphorComponent}
+              intensity={sd.motionIntensity ?? 0.7}
+              startFrame={8}
+              size={200}
+            />
+          </div>
+        )}
 
         {/* Metrics row — stagger controlled by motionEnergy */}
         <div style={{ display: "flex", gap: 60, justifyContent: "center", marginBottom: 44 }}>

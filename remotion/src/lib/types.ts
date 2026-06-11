@@ -76,6 +76,8 @@ export interface SceneDesign {
   density: SceneDensity;
   accentVariant: AccentVariant;
   badgeTexts: string[];
+  motionIntensity?: number;     // 0.0-1.0 for metaphor animation strength
+  metaphorComponent?: string;   // Remotion component name ("RocketAnimation" etc.)
 }
 
 // ── Video Style System ──────────────────────────────────────────────────────
