@@ -61,6 +61,23 @@ export interface MotionPlan {
   motionComponent: MotionComponent;
 }
 
+// ── Scene Designer ──────────────────────────────────────────────────────────
+export type MotionEnergy = "low" | "medium" | "high" | "explosive";
+export type SceneDensity = "minimal" | "standard" | "dense";
+export type AccentVariant = "default" | "success" | "warning" | "danger";
+
+export interface SceneDesign {
+  concept: string;
+  visualMetaphor: string;    // "growth-chart" | "shield" | "speed-lines" | …
+  primaryComponent: string;  // "MetricCounter" | "FeatureCard" | "QuoteCard" | …
+  secondaryComponents: string[];
+  background: string;        // "ParticleField" | "AnimatedGrid" | "GlowBackground"
+  motionEnergy: MotionEnergy;
+  density: SceneDensity;
+  accentVariant: AccentVariant;
+  badgeTexts: string[];
+}
+
 // ── Video Style System ──────────────────────────────────────────────────────
 export type VideoStyle = "hybrid" | "website-showcase" | "motion-graphics";
 export type ComponentRole = "screenshot" | "motion";
@@ -89,6 +106,9 @@ export interface BaseSceneProps {
   componentType?: string;       // Remotion renderer key ("ScreenshotScene" / motion name)
   componentRole?: ComponentRole;
   motionIntent?: MotionIntent;
+
+  // ── Scene Designer (set by scene_designer.py) ──
+  sceneDesign?: SceneDesign;
 
   // ── Visual Mapper (set by visual_mapper.py) ──
   visualTargetId?: string | null;

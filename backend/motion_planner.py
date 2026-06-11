@@ -106,6 +106,19 @@ def _plan_camera(
     # Inject real focusX/Y from visual mapper if available
     if has_visual_target and mapped_fx is not None:
         cam = {**cam, "focusX": mapped_fx, "focusY": mapped_fy}
+
+    # Scale zoom range with sceneDesign.motionEnergy
+    if scene:
+        energy = (scene.get("sceneDesign") or {}).get("motionEnergy", "medium")
+        energy_zoom = {"low": 0.98, "medium": 1.0, "high": 1.02, "explosive": 1.04}
+        boost = energy_zoom.get(energy, 1.0)
+        if boost != 1.0:
+            cam = {
+                **cam,
+                "zoomFrom": round(cam["zoomFrom"] * boost, 3),
+                "zoomTo":   round(cam["zoomTo"]   * boost, 3),
+            }
+
     return cam
 
 
@@ -281,9 +294,16 @@ def _plan_badges(
     exit_frame = duration - 15
     badges: list[dict] = []
 
+    # Prefer badge texts from Scene Designer when available
+    sd = scene.get("sceneDesign")
+    sd_badges = sd.get("badgeTexts", []) if sd else []
+    accent_variant = sd.get("accentVariant", "default") if sd else "default"
+    badge_color = GREEN if accent_variant == "success" else ACCENT
+
     if scene_type == "cta":
+        label = sd_badges[0] if sd_badges else "FREE"
         badges.append({
-            "text": "FREE",
+            "text": label,
             "icon": "✦",
             "x": int(CX + 230),
             "y": int(H * 0.63),
@@ -293,36 +313,61 @@ def _plan_badges(
         })
 
     elif scene_type == "hero":
+        label = sd_badges[0] if sd_badges else scene.get("badge", "NEW")
         badges.append({
-            "text": scene.get("badge", "NEW"),
+            "text": label,
             "icon": None,
             "x": int(W * 0.5),
             "y": int(H * 0.18),
             "startFrame": 5,
             "exitFrame": exit_frame,
-            "color": ACCENT,
+            "color": badge_color,
         })
 
     elif scene_type == "features":
-        # If any bullet contains a number/metric, surface it as a badge
-        bullets = scene.get("bullets", [])
-        for b in bullets:
-            m = _NUMBER_RE.search(b or "")
-            if m:
-                badges.append({
-                    "text": m.group(),
-                    "icon": None,
-                    "x": int(W * 0.78),
-                    "y": int(H * 0.22),
-                    "startFrame": 20,
-                    "exitFrame": exit_frame,
-                    "color": ORANGE,
-                })
-                break  # one metric badge per scene
+        # Use Scene Designer badge first; fall back to first metric in bullets
+        if sd_badges:
+            badges.append({
+                "text": sd_badges[0],
+                "icon": None,
+                "x": int(W * 0.78),
+                "y": int(H * 0.22),
+                "startFrame": 20,
+                "exitFrame": exit_frame,
+                "color": badge_color,
+            })
+        else:
+            bullets = scene.get("bullets", [])
+            for b in bullets:
+                m = _NUMBER_RE.search(b or "")
+                if m:
+                    badges.append({
+                        "text": m.group(),
+                        "icon": None,
+                        "x": int(W * 0.78),
+                        "y": int(H * 0.22),
+                        "startFrame": 20,
+                        "exitFrame": exit_frame,
+                        "color": ORANGE,
+                    })
+                    break
+
+    elif scene_type == "benefits":
+        label = sd_badges[0] if sd_badges else "PROVEN"
+        badges.append({
+            "text": label,
+            "icon": "✦",
+            "x": int(W * 0.78),
+            "y": int(H * 0.20),
+            "startFrame": 18,
+            "exitFrame": exit_frame,
+            "color": badge_color,
+        })
 
     elif scene_type == "testimonials":
+        label = sd_badges[0] if sd_badges else "VERIFIED"
         badges.append({
-            "text": "VERIFIED",
+            "text": label,
             "icon": "✓",
             "x": int(CX + 300),
             "y": int(H * 0.68),
@@ -347,17 +392,36 @@ def _assign_motion_component(
 ) -> str:
     """
     Decide which Motion Graphics Library component the scene should render.
-    Returned value matches MotionComponent type in types.ts.
 
-    hook        → textReveal   (big stat + TextReveal headline)
-    problem     → zoomHighlight (zoom + HighlightRing overlay)
-    solution    → successPulse  (SuccessAnimation on checkpoint completion)
-    features    → metricCounter if any bullet contains a number, else cursorClick
-    benefits    → metricCounter  (outcome metric display)
-    testimonials→ none          (card + quote are enough)
-    cta         → ctaAnimation  (CTAButtonAnimation)
-    default     → none
+    Priority:
+      1. sceneDesign.primaryComponent (set by Scene Designer from content meaning)
+      2. Scene-type heuristics (fallback)
     """
+    # Scene Designer override — maps component names to MotionComponent enum values
+    _COMPONENT_MAP = {
+        "MetricCounter":   "metricCounter",
+        "ProgressBar":     "metricCounter",   # progress bars use same slot
+        "FeatureCard":     "cursorClick",
+        "QuoteCard":       "none",
+        "KineticHeadline": "textReveal",
+        "FloatingBadge":   "none",
+    }
+    sd = scene.get("sceneDesign")
+    if sd:
+        mapped = _COMPONENT_MAP.get(sd.get("primaryComponent", ""), None)
+        if mapped is not None:
+            # Respect per-scene-type overrides that must not be changed
+            if scene_type == "hook":
+                return "textReveal"
+            if scene_type == "problem":
+                return "zoomHighlight"
+            if scene_type == "solution":
+                return "successPulse"
+            if scene_type == "cta":
+                return "ctaAnimation"
+            return mapped
+
+    # Fallback heuristics
     if scene_type == "hook":
         return "textReveal"
     if scene_type == "problem":
@@ -367,11 +431,9 @@ def _assign_motion_component(
     if scene_type == "cta":
         return "ctaAnimation"
     if scene_type in ("features", "benefits"):
-        # Use MetricCounter if any bullet / bodyText has numbers
         bullets = [str(b) for b in (scene.get("bullets") or [])]
         body = scene.get("bodyText") or ""
-        text_to_check = " ".join(bullets) + str(body)
-        if _NUMBER_RE.search(text_to_check):
+        if _NUMBER_RE.search(" ".join(bullets) + str(body)):
             return "metricCounter"
         return "cursorClick"
     return "none"

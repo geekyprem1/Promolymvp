@@ -1,6 +1,6 @@
 import React from "react";
 import { useCurrentFrame, interpolate, spring, useVideoConfig } from "remotion";
-import { AnySceneProps } from "../lib/types";
+import { AnySceneProps, SceneDesign, MotionEnergy } from "../lib/types";
 import { HookScene } from "./HookScene";
 import { ProblemScene } from "./ProblemScene";
 import { SolutionScene } from "./SolutionScene";
@@ -20,7 +20,48 @@ import { useTemplate } from "../lib/templates";
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const METRIC_RE = /(\d[\d,\.]*)\s*(%|x|\+|k|K|M|B)?/g;
+
+// Icons keyed by concept for semantic matching
+const CONCEPT_ICONS: Record<string, string[]> = {
+  speed:        ["⚡", "🚀", "▶", "↯", "✦"],
+  growth:       ["📈", "▲", "✦", "◆", "★"],
+  security:     ["🔒", "🛡", "✓", "◉", "●"],
+  automation:   ["⚙", "◆", "↻", "✦", "▶"],
+  savings:      ["💰", "✦", "◆", "★", "●"],
+  simplicity:   ["✓", "◆", "✦", "●", "▲"],
+  social_proof: ["★", "✓", "◉", "✦", "●"],
+  performance:  ["⚡", "◆", "▲", "✦", "●"],
+  collaboration:["◉", "✦", "●", "◆", "▲"],
+  analytics:    ["📊", "▲", "◆", "✦", "●"],
+};
 const CARD_ICONS = ["⚡", "✦", "◆", "●", "▲", "✧", "★", "◉"];
+
+function conceptIcons(concept?: string): string[] {
+  return CONCEPT_ICONS[concept ?? ""] ?? CARD_ICONS;
+}
+
+// Background component selector driven by sceneDesign.background
+const BG_VARIANT: Record<string, "hero" | "split" | "cta"> = {
+  growth:        "hero",
+  speed:         "split",
+  security:      "cta",
+  automation:    "split",
+  savings:       "cta",
+  simplicity:    "split",
+  social_proof:  "cta",
+  performance:   "hero",
+  collaboration: "hero",
+  analytics:     "hero",
+};
+
+function glowVariant(concept?: string): "hero" | "split" | "cta" {
+  return BG_VARIANT[concept ?? ""] ?? "split";
+}
+
+// Energy → animation scale multiplier for stagger delays / zoom boost
+const ENERGY_STAGGER: Record<MotionEnergy, number> = {
+  low: 16, medium: 12, high: 8, explosive: 5,
+};
 
 interface ExtractedMetric {
   value: number;
@@ -85,6 +126,7 @@ export const MotionGraphicsScene: React.FC<AnySceneProps> = (scene) => {
 
 const FeatureGrid: React.FC<{ scene: AnySceneProps }> = ({ scene }) => {
   const { headline, subheadline, badge } = scene;
+  const sd: SceneDesign | undefined = scene.sceneDesign;
   const bullets: string[] = (scene as any).bullets ?? [];
   const bodyText: string  = (scene as any).bodyText ?? "";
   const { width, height } = useVideoConfig();
@@ -92,25 +134,32 @@ const FeatureGrid: React.FC<{ scene: AnySceneProps }> = ({ scene }) => {
   const c   = tpl.colors;
   const frame = useCurrentFrame();
 
+  const concept  = sd?.concept ?? "performance";
+  const energy   = sd?.motionEnergy ?? "medium";
+  const stagger  = ENERGY_STAGGER[energy];
+  const icons    = conceptIcons(concept);
+  const bgBg     = sd?.background ?? "AnimatedGrid";
+  const accentOk = sd?.accentVariant === "success";
+
   // Build feature items
   const rawItems = (bullets?.length ? bullets : bodyText.split(".").map((s: string) => s.trim()))
     .filter((b: string) => b && b.length > 3)
     .slice(0, 3);
   const items = rawItems.length ? rawItems : ["Fast and reliable", "Easy to integrate", "Scales with you"];
 
-  // Auto-detect metrics from headline + subheadline + bullets
+  // Auto-detect metrics
   const allText = [headline, subheadline, ...items].filter(Boolean);
   const metrics = extractMetrics(allText);
   const primaryMetric = metrics[0];
 
-  // Progress values for cards (staggered 70-95%)
-  const cardProgress = [92, 78, 86];
+  // Badge texts from Scene Designer, fallback to generic
+  const chipBadges = sd?.badgeTexts?.length ? sd.badgeTexts : [badge || "Featured", "Proven"];
 
-  // Secondary badge floats in top-right corner
-  const badgeTexts = ["Trusted", "Proven", "Fast", "Secure", "Top Rated"];
-  const badgeText  = badge || badgeTexts[Math.floor(Math.random() * badgeTexts.length)] || "Featured";
+  // Progress values — higher for "speed" / "performance" concepts
+  const cardProgress = concept === "security" ? [95, 98, 99] :
+                       concept === "speed"    ? [88, 94, 97] :
+                                                [92, 78, 86];
 
-  // Title slide
   const titleY = interpolate(frame, [8, 28], [30, 0], {
     extrapolateLeft: "clamp", extrapolateRight: "clamp", easing: easeOutCubic,
   });
@@ -121,19 +170,23 @@ const FeatureGrid: React.FC<{ scene: AnySceneProps }> = ({ scene }) => {
   return (
     <div style={{ width, height, position: "relative", overflow: "hidden", fontFamily: tpl.typography.headingFont }}>
 
-      {/* BG layer */}
-      <GlowBackground variant="hero" startFrame={0} />
-      <AnimatedGrid color={c.accent} opacity={0.08} startFrame={0} />
+      {/* BG layer — concept-driven */}
+      <GlowBackground variant={glowVariant(concept)} startFrame={0} />
+      {bgBg === "AnimatedGrid"
+        ? <AnimatedGrid color={c.accent} opacity={0.08} startFrame={0} />
+        : <ParticleField color={c.accent} count={14} startFrame={0} intensity={0.6} />
+      }
 
-      {/* Secondary layer — floating badge top-right + optional metric chip */}
-      <div style={{ position: "absolute", top: 52, right: 60, zIndex: 3, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 16 }}>
-        <FloatingBadge text={badgeText} icon="✦" variant="chip" startFrame={5} />
+      {/* Secondary layer — concept-derived badge chips */}
+      <div style={{ position: "absolute", top: 52, right: 60, zIndex: 3, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 14 }}>
+        {chipBadges.slice(0, 2).map((txt, i) => (
+          <FloatingBadge key={i} text={txt} icon={icons[0]} variant="chip" startFrame={5 + i * 10} />
+        ))}
         {primaryMetric && (
           <FloatingBadge
             text={`${primaryMetric.prefix}${primaryMetric.value}${primaryMetric.suffix}`}
             variant="chip"
-            startFrame={18}
-            style={{ fontSize: 14 }}
+            startFrame={24}
           />
         )}
       </div>
@@ -168,7 +221,7 @@ const FeatureGrid: React.FC<{ scene: AnySceneProps }> = ({ scene }) => {
           )}
         </div>
 
-        {/* Cards row */}
+        {/* Cards row — stagger speed controlled by motionEnergy */}
         <div style={{ display: "flex", gap: 28, justifyContent: "center", alignItems: "flex-start" }}>
           {items.map((text: string, i: number) => {
             const title = text.split(" ").slice(0, 3).join(" ");
@@ -176,15 +229,15 @@ const FeatureGrid: React.FC<{ scene: AnySceneProps }> = ({ scene }) => {
             return (
               <div key={i} style={{ display: "flex", flexDirection: "column", gap: 16, width: 360 }}>
                 <FeatureCard
-                  icon={CARD_ICONS[i % CARD_ICONS.length]}
+                  icon={icons[i % icons.length]}
                   title={title}
                   description={desc}
-                  startFrame={24 + i * 12}
+                  startFrame={20 + i * stagger}
                 />
                 <ProgressBar
                   toPercent={cardProgress[i]}
                   showValue={true}
-                  startFrame={36 + i * 12}
+                  startFrame={30 + i * stagger}
                   height={10}
                   style={{ width: 360 }}
                 />
@@ -203,6 +256,7 @@ const FeatureGrid: React.FC<{ scene: AnySceneProps }> = ({ scene }) => {
 
 const BenefitGrid: React.FC<{ scene: AnySceneProps }> = ({ scene }) => {
   const { headline, subheadline, badge } = scene;
+  const sd: SceneDesign | undefined = scene.sceneDesign;
   const bodyText: string = (scene as any).bodyText ?? "";
   const bullets: string[] = (scene as any).bullets ?? [];
   const { width, height } = useVideoConfig();
@@ -210,22 +264,43 @@ const BenefitGrid: React.FC<{ scene: AnySceneProps }> = ({ scene }) => {
   const c   = tpl.colors;
   const frame = useCurrentFrame();
 
+  const concept = sd?.concept ?? "growth";
+  const energy  = sd?.motionEnergy ?? "medium";
+  const stagger = ENERGY_STAGGER[energy];
+  const bgBg    = sd?.background ?? "ParticleField";
+
   const allLines = [
     ...(bodyText ? bodyText.split(".").map((s: string) => s.trim()) : []),
     ...bullets,
   ].filter((b: string) => b && b.length > 3);
 
   const metrics = extractMetrics([headline, subheadline, ...allLines].filter(Boolean));
-  const safeMetrics = metrics.length > 0 ? metrics : [{ value: 99, suffix: "%", prefix: "", label: "Uptime" }];
+
+  // Concept-driven default metric when none detected
+  const conceptMetricDefaults: Record<string, { value: number; suffix: string; label: string }> = {
+    speed:        { value: 10, suffix: "×",  label: "Faster" },
+    growth:       { value: 300, suffix: "%", label: "Growth" },
+    security:     { value: 99.9, suffix: "%", label: "Uptime" },
+    performance:  { value: 99.9, suffix: "%", label: "Uptime" },
+    savings:      { value: 40, suffix: "%",  label: "Cost Saved" },
+    automation:   { value: 80, suffix: "%",  label: "Time Saved" },
+    simplicity:   { value: 5, suffix: " min", label: "Setup" },
+    social_proof: { value: 10000, suffix: "+", label: "Users" },
+    analytics:    { value: 100, suffix: "%",  label: "Data Coverage" },
+    collaboration:{ value: 50, suffix: "+",  label: "Integrations" },
+  };
+  const defaultMetric = conceptMetricDefaults[concept] ?? { value: 99, suffix: "%", label: "Uptime" };
+  const safeMetrics = metrics.length > 0
+    ? metrics
+    : [{ value: defaultMetric.value, suffix: defaultMetric.suffix, prefix: "", label: defaultMetric.label }];
 
   const benefitLines = allLines.filter((l: string) => !METRIC_RE.test(l)).slice(0, 4);
   const safeBenefits = benefitLines.length ? benefitLines : ["Built to scale", "Loved by teams", "Enterprise ready"];
 
-  // Badge chips from metrics
-  const badgeChips = [
-    badge || "Proven Results",
-    ...safeMetrics.map(m => `${m.prefix}${m.value}${m.suffix}+`).slice(0, 2),
-  ];
+  // Badge chips: prefer Scene Designer, then build from metrics
+  const badgeChips = sd?.badgeTexts?.length
+    ? sd.badgeTexts
+    : [badge || "Proven Results", ...safeMetrics.map(m => `${m.prefix}${m.value}${m.suffix}+`).slice(0, 2)];
 
   const titleOpacity = interpolate(frame, [0, 20], [0, 1], {
     extrapolateLeft: "clamp", extrapolateRight: "clamp",
@@ -237,14 +312,17 @@ const BenefitGrid: React.FC<{ scene: AnySceneProps }> = ({ scene }) => {
   return (
     <div style={{ width, height, position: "relative", overflow: "hidden", fontFamily: tpl.typography.headingFont }}>
 
-      {/* BG layer */}
-      <GlowBackground variant="cta" startFrame={0} />
-      <ParticleField color={c.accent} startFrame={0} intensity={0.7} />
+      {/* BG layer — concept-driven */}
+      <GlowBackground variant={glowVariant(concept)} startFrame={0} />
+      {bgBg === "AnimatedGrid"
+        ? <AnimatedGrid color={c.accent} opacity={0.08} startFrame={0} />
+        : <ParticleField color={c.accent} count={16} startFrame={0} intensity={concept === "growth" ? 0.9 : 0.6} />
+      }
 
       {/* Secondary layer — badge chips top left */}
       <div style={{ position: "absolute", top: 52, left: 60, zIndex: 3, display: "flex", gap: 12 }}>
-        {badgeChips.map((txt, i) => (
-          <FloatingBadge key={i} text={txt} variant="chip" startFrame={i * 10} />
+        {badgeChips.slice(0, 3).map((txt, i) => (
+          <FloatingBadge key={i} text={txt} variant="chip" startFrame={i * stagger} />
         ))}
       </div>
 
@@ -274,7 +352,7 @@ const BenefitGrid: React.FC<{ scene: AnySceneProps }> = ({ scene }) => {
           )}
         </div>
 
-        {/* Metrics row */}
+        {/* Metrics row — stagger controlled by motionEnergy */}
         <div style={{ display: "flex", gap: 60, justifyContent: "center", marginBottom: 44 }}>
           {safeMetrics.slice(0, 3).map((m, i) => (
             <MetricCounter
@@ -284,7 +362,7 @@ const BenefitGrid: React.FC<{ scene: AnySceneProps }> = ({ scene }) => {
               prefix={m.prefix}
               suffix={m.suffix}
               label={m.label || ""}
-              startFrame={20 + i * 14}
+              startFrame={20 + i * stagger}
               style={{ minWidth: 160 }}
             />
           ))}
@@ -293,7 +371,7 @@ const BenefitGrid: React.FC<{ scene: AnySceneProps }> = ({ scene }) => {
         {/* Benefit rows */}
         <div style={{ display: "flex", flexDirection: "column", gap: 14, alignItems: "center" }}>
           {safeBenefits.slice(0, 3).map((text: string, i: number) => (
-            <BenefitRow key={i} text={text} accent={c.accent} textColor={c.text} startFrame={34 + i * 10} />
+            <BenefitRow key={i} text={text} accent={c.accent} textColor={c.text} startFrame={34 + i * stagger} />
           ))}
         </div>
       </div>
@@ -433,30 +511,39 @@ const StarIcon: React.FC<{ color: string; delay: number }> = ({ color, delay }) 
 
 // ── KineticHeadline ───────────────────────────────────────────────────────────
 
-const KineticHeadline: React.FC<AnySceneProps> = ({ headline, subheadline, badge }) => {
+const KineticHeadline: React.FC<AnySceneProps> = (scene) => {
+  const { headline, subheadline, badge } = scene;
+  const sd: SceneDesign | undefined = scene.sceneDesign;
   const { width, height } = useVideoConfig();
   const tpl = useTemplate();
   const c   = tpl.colors;
   const frame = useCurrentFrame();
 
-  // Animated underline
-  const lineW = interpolate(frame, [32, 56], [0, 260], {
+  const concept = sd?.concept ?? "growth";
+  const energy  = sd?.motionEnergy ?? "high";
+  const bgBg    = sd?.background ?? "AnimatedGrid";
+
+  // Animated underline — faster for high energy
+  const lineEnd = energy === "explosive" ? 44 : energy === "high" ? 48 : 56;
+  const lineW = interpolate(frame, [28, lineEnd], [0, 260], {
     extrapolateLeft: "clamp", extrapolateRight: "clamp", easing: easeOutCubic,
   });
 
   // Subheadline fade
-  const subOpacity = interpolate(frame, [36, 52], [0, 1], {
+  const subOpacity = interpolate(frame, [34, 50], [0, 1], {
     extrapolateLeft: "clamp", extrapolateRight: "clamp",
   });
-  const subY = interpolate(frame, [36, 52], [16, 0], {
+  const subY = interpolate(frame, [34, 50], [16, 0], {
     extrapolateLeft: "clamp", extrapolateRight: "clamp", easing: easeOutCubic,
   });
 
-  // Floating chips
-  const chips = ["#1 Rated", "Now Live", "Get Started"];
-  const chipText = badge
-    ? [badge, chips[1]]
-    : chips.slice(0, 2);
+  // Badge chips — from Scene Designer
+  const sdChips = sd?.badgeTexts ?? [];
+  const chipText = sdChips.length >= 2
+    ? sdChips.slice(0, 2)
+    : badge
+      ? [badge, sdChips[0] ?? "Now Live"]
+      : ["#1 Rated", "Now Live"];
 
   // Extract any metric from headline/subheadline
   const metrics = extractMetrics([headline, subheadline].filter(Boolean));
@@ -465,10 +552,14 @@ const KineticHeadline: React.FC<AnySceneProps> = ({ headline, subheadline, badge
   return (
     <div style={{ width, height, position: "relative", overflow: "hidden", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center", fontFamily: tpl.typography.headingFont }}>
 
-      {/* BG layer */}
-      <GlowBackground variant="hero" startFrame={0} />
-      <AnimatedGrid color={c.accent} opacity={0.07} spacing={56} startFrame={0} />
-      <ParticleField color={c.accent} count={14} startFrame={0} intensity={0.6} />
+      {/* BG layer — concept-driven */}
+      <GlowBackground variant={glowVariant(concept)} startFrame={0} />
+      {bgBg === "ParticleField"
+        ? <ParticleField color={c.accent} count={18} startFrame={0} intensity={energy === "explosive" ? 1.0 : 0.7} />
+        : <AnimatedGrid color={c.accent} opacity={0.07} spacing={56} startFrame={0} />
+      }
+      {/* Always add subtle particles for hero/kinetic scenes */}
+      <ParticleField color={c.accent} count={10} startFrame={0} intensity={0.3} />
 
       {/* Secondary — chip row top + metric chip bottom-left */}
       <div style={{ position: "absolute", top: 52, left: "50%", transform: "translateX(-50%)", zIndex: 3, display: "flex", gap: 14 }}>

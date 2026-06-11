@@ -39,6 +39,7 @@ from music_selector import select_music
 from audio_mixer import mix_audio
 from voiceover_provider import get_voiceover_provider
 from visual_mapper import map_visuals
+from scene_designer import design_scenes
 
 BASE_DIR        = Path(__file__).parent
 SCREENSHOTS_DIR = BASE_DIR / "screenshots"
@@ -189,6 +190,10 @@ async def run_pipeline(
     _set(session_id, "rendering", 52, "Applying video style…")
     print(f"[Style] Requested video_style: {video_style or DEFAULT_STYLE_ID}", flush=True)
     remotion_props = apply_style(remotion_props, video_style)
+
+    # ── STEP 3c.5: Scene Designer ─────────────────────────────────────────────
+    _set(session_id, "rendering", 52, "Designing scenes…")
+    remotion_props = design_scenes(remotion_props)
 
     # ── STEP 3d: Motion Planner ───────────────────────────────────────────────
     _set(session_id, "rendering", 53, "Planning motion…")
